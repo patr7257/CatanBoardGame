@@ -148,19 +148,26 @@ public class DrawOrDisplay {
             hoverLine.setOpacity(0);
             hoverLine = null;
         }
+        Color playerColor = currentPlayerColor();
         Circle vertex = findNearestVertexCircle(event.getSceneX(), event.getSceneY());
         if (vertex != null) {
-            vertex.setFill(Color.rgb(255, 215, 0, 0.55));
-            vertex.setStroke(Color.GOLD);
+            vertex.setFill(Color.color(playerColor.getRed(), playerColor.getGreen(), playerColor.getBlue(), 0.55));
+            vertex.setStroke(playerColor);
             vertex.setStrokeWidth(2.0 / boardRadius);
             hoverCircle = vertex;
             return;
         }
         Line edge = findNearestEdgeLine(event.getSceneX(), event.getSceneY());
         if (edge != null) {
+            edge.setStroke(playerColor);
             edge.setOpacity(0.7);
             hoverLine = edge;
         }
+    }
+
+    private Color currentPlayerColor() {
+        Player current = gameplay.getCurrentPlayer();
+        return current != null ? current.getColor() : Color.GOLD;
     }
 
     // Map a scene-space click into the board's UNSCALED local coordinates. JPro honors the
