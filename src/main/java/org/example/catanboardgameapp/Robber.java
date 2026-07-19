@@ -35,12 +35,18 @@ public class Robber {
     public void activateRobber(boolean sevenRolled, Player player) {
         hideButtons();
         if (sevenRolled) {
-            whoShouldDiscardCards();            // 7 was rolled
+            // Discards are now non-blocking; place the robber only once they finish.
+            whoShouldDiscardCards(() -> proceedWithRobberPlacement(player));
         } else {                                // Knight Development Card
             player.increasePlayedKnights();
             gameplay.getBiggestArmy()
                     .calculateAndUpdateBiggestArmy(player);
+            proceedWithRobberPlacement(player);
         }
+    }
+
+    // Robber placement (AI or human), run after any 7-roll discards complete.
+    private void proceedWithRobberPlacement(Player player) {
         // AI Player Logic
         if (player instanceof AIOpponent ai) {
             AIHandleRobberMechanics(ai);
@@ -68,19 +74,22 @@ public class Robber {
                                     chosenTile, gameplay.getCurrentPlayer());
                             if (victims.isEmpty()) {
                                 catanBoardGameView.logToGameLog("Bad Robber placement! No players to steal from.");
+                                showButtons();
+                                catanBoardGameView.refreshSidebar();
                             } else {
                                 catanBoardGameView.logToGameLog(player + " Placed the robber on a new Tile!");
-                                drawOrDisplay.showRobberVictimDialog(victims)
-                                        .ifPresent(victim -> {
-                                            boolean success = stealResourceFrom(victim, player);
-                                            if (!success) {
-                                                catanBoardGameView.logToGameLog(
-                                                        "Failed to steal a resource from " + victim);
-                                            }
-                                        });
+                                drawOrDisplay.showRobberVictimDialog(victims, victim -> {
+                                    if (victim != null) {
+                                        boolean success = stealResourceFrom(victim, player);
+                                        if (!success) {
+                                            catanBoardGameView.logToGameLog(
+                                                    "Failed to steal a resource from " + victim);
+                                        }
+                                    }
+                                    showButtons();
+                                    catanBoardGameView.refreshSidebar();
+                                });
                             }
-                            showButtons();
-                            catanBoardGameView.refreshSidebar();
                         });
             });
         }
@@ -166,38 +175,56 @@ public class Robber {
         return null;
     }
 
-    private void whoShouldDiscardCards() {
+    // Handle 7-roll discards. AI discards immediately; human discards are shown one at a
+    // time via non-blocking overlays, then onComplete runs (robber placement continues).
+    private void whoShouldDiscardCards(Runnable onComplete) {
+        List<Player> humansToDiscard = new ArrayList<>();
         for (Player player : gameplay.getPlayerList()) {
-            int totalCards = player.getResources()
-                    .values()
-                    .stream()
-                    .mapToInt(Integer::intValue)
-                    .sum();
+            int totalCards = player.getResources().values().stream().mapToInt(Integer::intValue).sum();
             if (totalCards <= 7) {
                 continue;   // no discard needed
             }
-            // AI player, away from FX thread
             if (player instanceof AIOpponent ai) {
                 Map<String, Integer> discarded = AIChooseCardsToDiscard(ai);
                 if (discarded != null) {
                     discardResources(player, discarded);
                 }
                 catanBoardGameView.runOnFX(catanBoardGameView::refreshSidebar);
-            }
-            else {
-                gameplay.pauseGame(true);
-                Map<String, Integer> discarded = chooseCardsToDiscard(player, gameplay);
-                if (discarded != null) {
-                    // Optional log
-                    StringBuilder discardText = new StringBuilder(player + " auto-discarded: ");
-                    discarded.forEach((res, amt) -> discardText.append(amt).append(" ").append(res).append(", "));
-                    discardText.setLength(discardText.length() - 2); // remove trailing comma
-                    gameplay.getCatanBoardGameView().logToGameLog(discardText.toString());
-                    discardResources(player, discarded);
-                }
-                catanBoardGameView.refreshSidebar();
+            } else {
+                humansToDiscard.add(player);
             }
         }
+        processHumanDiscards(humansToDiscard, 0, onComplete);
+    }
+
+    // Show each human's discard overlay sequentially, then run onComplete.
+    private void processHumanDiscards(List<Player> humans, int index, Runnable onComplete) {
+        if (index >= humans.size()) {
+            if (onComplete != null) catanBoardGameView.runOnFX(onComplete);
+            return;
+        }
+        Player player = humans.get(index);
+        Map<String, Integer> playerResources = new HashMap<>(player.getResources());
+        int totalCards = playerResources.values().stream().mapToInt(Integer::intValue).sum();
+        int toDiscard = totalCards / 2;
+        if (toDiscard == 0) {
+            processHumanDiscards(humans, index + 1, onComplete);
+            return;
+        }
+        gameplay.pauseGame(true);
+        catanBoardGameView.runOnFX(() ->
+                drawOrDisplay.showDiscardDialog(player, toDiscard, playerResources, gameplay, discarded -> {
+                    if (discarded != null) {
+                        StringBuilder discardText = new StringBuilder(player + " discarded: ");
+                        discarded.forEach((res, amt) -> discardText.append(amt).append(" ").append(res).append(", "));
+                        if (discardText.length() >= 2) discardText.setLength(discardText.length() - 2);
+                        gameplay.getCatanBoardGameView().logToGameLog(discardText.toString());
+                        discardResources(player, discarded);
+                    }
+                    catanBoardGameView.refreshSidebar();
+                    processHumanDiscards(humans, index + 1, onComplete);
+                })
+        );
     }
 
     public Player AIHardChooseBestRobberVictim(AIOpponent ai, List<Player> victims) {
@@ -249,15 +276,6 @@ public class Robber {
         });
     }
 
-    // For Human Players - Choose which cards to Discard via Popup
-    private Map<String, Integer> chooseCardsToDiscard(Player player, Gameplay gameplay) {
-        Map<String, Integer> playerResources = new HashMap<>(player.getResources());
-        int totalCards = playerResources.values().stream().mapToInt(Integer::intValue).sum();
-        int toDiscard = totalCards / 2;
-        if (toDiscard == 0) return null;
-
-        return drawOrDisplay.showDiscardDialog(player, toDiscard, playerResources, gameplay);
-    }
 
     // AI automatically discards cards
     public Map<String, Integer> AIChooseCardsToDiscard(AIOpponent ai) {

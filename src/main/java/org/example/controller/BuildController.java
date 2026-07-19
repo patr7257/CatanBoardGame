@@ -75,41 +75,40 @@ public class BuildController {
 
             Player currentPlayer = gameController.getGameplay().getCurrentPlayer();
 
-            // Optional confirmation dialog
+            // Optional confirmation, now a non-blocking overlay (JPro-safe).
             if (isConfirmBeforeBuildEnabled()) {
-                Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
-                confirmAlert.setTitle("Confirm Build");
-                confirmAlert.setHeaderText("Build Road");
-                confirmAlert.setContentText("Are you sure you want to place a road here?");
-                Optional<ButtonType> result = confirmAlert.showAndWait();
-
-                if (result.isEmpty() || result.get() != ButtonType.OK) {
-                    return;
-                }
-            }
-
-            // Attempt to build the road
-            BuildResult result = gameController.getGameplay().buildRoad(edge);
-            switch (result) {
-                case SUCCESS -> {
-                    buildRoad(edge, currentPlayer);
-                    // Proceed to next player if in initial phase
-                    if (gameController.getGameplay().isInInitialPhase()
-                            && !gameController.getGameplay().isWaitingForInitialRoad()) {
-                        gameController.getGameplay().nextPlayerTurn();
-                    }
-                    gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
-                }
-                case TOO_MANY_ROADS -> drawOrDisplay.showMaxRoadsReachedPopup();
-
-                case NOT_CONNECTED, INVALID_EDGE, INSUFFICIENT_RESOURCES -> {
-                    // Show red cross for failed placement
-                    double midX = (edge.getVertex1().getX() + edge.getVertex2().getX()) / 2;
-                    double midY = (edge.getVertex1().getY() + edge.getVertex2().getY()) / 2;
-                    drawOrDisplay.drawErrorCross(boardGroup, midX, midY);
-            }
+                gameController.getGameView().showConfirmOverlay(
+                        "Confirm Build", "Place a road here?", "Build", "Cancel",
+                        () -> attemptBuildRoad(edge, currentPlayer), null);
+            } else {
+                attemptBuildRoad(edge, currentPlayer);
             }
         };
+    }
+
+    // Actually places the road and handles the result. Split out so it can run either
+    // immediately or from the confirmation overlay's callback.
+    private void attemptBuildRoad(Edge edge, Player currentPlayer) {
+        BuildResult result = gameController.getGameplay().buildRoad(edge);
+        switch (result) {
+            case SUCCESS -> {
+                buildRoad(edge, currentPlayer);
+                // Proceed to next player if in initial phase
+                if (gameController.getGameplay().isInInitialPhase()
+                        && !gameController.getGameplay().isWaitingForInitialRoad()) {
+                    gameController.getGameplay().nextPlayerTurn();
+                }
+                gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
+            }
+            case TOO_MANY_ROADS -> drawOrDisplay.showMaxRoadsReachedPopup();
+
+            case NOT_CONNECTED, INVALID_EDGE, INSUFFICIENT_RESOURCES -> {
+                // Show red cross for failed placement
+                double midX = (edge.getVertex1().getX() + edge.getVertex2().getX()) / 2;
+                double midY = (edge.getVertex1().getY() + edge.getVertex2().getY()) / 2;
+                drawOrDisplay.drawErrorCross(boardGroup, midX, midY);
+            }
+        }
     }
 
     //___________________________ SETTLEMENT / CITY PLACEMENT HANDLER ___________________________
@@ -132,58 +131,58 @@ public class BuildController {
             Player currentPlayer = gameController.getGameplay().getCurrentPlayer();
             if (gameController.getGameplay().isBlockedByAITurn()) return;
 
-            // Confirm action first
+            // Optional confirmation, now a non-blocking overlay (JPro-safe).
             if (isConfirmBeforeBuildEnabled()) {
-                Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
-                confirmAlert.setTitle("Confirm Build");
-                confirmAlert.setHeaderText("Build Structure");
-                confirmAlert.setContentText("Are you sure you want to place a settlement or upgrade to a city?");
-                Optional<ButtonType> result = confirmAlert.showAndWait();
-
-                if (result.isEmpty() || result.get() != ButtonType.OK) {
-                    return; // Player cancelled
-                }
-            }
-            // Try to place a settlement
-            BuildResult result;
-            if (gameController.getGameplay().isInInitialPhase()) {
-                result = gameController.getGameplay().buildInitialSettlement(vertex);
+                gameController.getGameView().showConfirmOverlay(
+                        "Confirm Build", "Place a settlement or upgrade to a city here?", "Build", "Cancel",
+                        () -> attemptBuildSettlementOrCity(circle, vertex, currentPlayer, root), null);
             } else {
-                result = gameController.getGameplay().buildSettlement(vertex);
-            }
-            switch (result) {
-                case SUCCESS -> {
-                    vertex.setOwner(currentPlayer);
-                    drawOrDisplay.drawSettlement(circle, vertex, boardGroup);
-                    circle.setOnMouseClicked(createSettlementClickHandler(circle, vertex, root));
-                    gameController.getGameView().logToGameLog(currentPlayer + "  built a SETTLEMENT");
-                    gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
-                }
-                case INSUFFICIENT_RESOURCES, INVALID_VERTEX -> {
-                    // Try to upgrade to city if settlement failed
-                    BuildResult cityResult = gameController.getGameplay().buildCity(vertex);
-                    if (cityResult == BuildResult.TOO_MANY_CITIES) {
-                            drawOrDisplay.showMaxCitiesReachedPopup();
-                            drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
-                    }
-                    if (cityResult == BuildResult.UPGRADED_TO_CITY) {
-                        vertex.setOwner(currentPlayer);
-                        gameController.getGameView().getSettlementLayer().getChildren().remove(circle);
-                        drawOrDisplay.drawCity(vertex, gameController.getGameplay().getCatanBoardGameView().getBoardGroup());
-                        gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
-                        gameController.getGameView().logToGameLog(currentPlayer + " built a CITY");
-
-                    } else {
-                        // Neither worked
-                        drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
-                    }
-                }
-                case TOO_MANY_SETTLEMENTS -> {
-                    drawOrDisplay.showMaxSettlementsReachedPopup();
-                }
-                default -> drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
+                attemptBuildSettlementOrCity(circle, vertex, currentPlayer, root);
             }
         };
+    }
+
+    // Places a settlement (or upgrades to a city) and handles the result. Split out so it
+    // can run immediately or from the confirmation overlay's callback.
+    private void attemptBuildSettlementOrCity(Circle circle, Vertex vertex, Player currentPlayer, BorderPane root) {
+        BuildResult result;
+        if (gameController.getGameplay().isInInitialPhase()) {
+            result = gameController.getGameplay().buildInitialSettlement(vertex);
+        } else {
+            result = gameController.getGameplay().buildSettlement(vertex);
+        }
+        switch (result) {
+            case SUCCESS -> {
+                vertex.setOwner(currentPlayer);
+                drawOrDisplay.drawSettlement(circle, vertex, boardGroup);
+                circle.setOnMouseClicked(createSettlementClickHandler(circle, vertex, root));
+                gameController.getGameView().logToGameLog(currentPlayer + "  built a SETTLEMENT");
+                gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
+            }
+            case INSUFFICIENT_RESOURCES, INVALID_VERTEX -> {
+                // Try to upgrade to city if settlement failed
+                BuildResult cityResult = gameController.getGameplay().buildCity(vertex);
+                if (cityResult == BuildResult.TOO_MANY_CITIES) {
+                        drawOrDisplay.showMaxCitiesReachedPopup();
+                        drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
+                }
+                if (cityResult == BuildResult.UPGRADED_TO_CITY) {
+                    vertex.setOwner(currentPlayer);
+                    gameController.getGameView().getSettlementLayer().getChildren().remove(circle);
+                    drawOrDisplay.drawCity(vertex, gameController.getGameplay().getCatanBoardGameView().getBoardGroup());
+                    gameController.getGameplay().getCatanBoardGameView().refreshSidebar();
+                    gameController.getGameView().logToGameLog(currentPlayer + " built a CITY");
+
+                } else {
+                    // Neither worked
+                    drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
+                }
+            }
+            case TOO_MANY_SETTLEMENTS -> {
+                drawOrDisplay.showMaxSettlementsReachedPopup();
+            }
+            default -> drawOrDisplay.drawErrorCross(boardGroup, vertex.getX(), vertex.getY());
+        }
     }
 
     //___________________________HELPERS__________________________________//

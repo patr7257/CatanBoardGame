@@ -9,12 +9,15 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
-import javafx.scene.Scene;
+import javafx.scene.Node;
+import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.transform.Scale;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
@@ -45,9 +48,13 @@ public class CatanBoardGameView {
     private final TurnController turnController;
     private final TradeController tradeController;
 
-    //---------------------------- JavaFX Root Scene ----------------------------//
-    private final Scene scene;
+    //---------------------------- JavaFX Root ----------------------------//
+    // The app owns one shared Scene (in GameController); this view only supplies
+    // its root node, which GameController swaps onto that Scene.
+    private Parent rootNode;
     private final BorderPane root;
+    // Non-blocking modal overlay (replaces showAndWait / modal Stages under JPro).
+    private final StackPane overlayLayer = new StackPane();
 
     //---------------------------- Render Layers ----------------------------//
     private final Group edgeBaseLayer;
@@ -55,6 +62,8 @@ public class CatanBoardGameView {
     private final Group settlementLayer;
     private final Group edgeClickLayer;
     private final Group boardGroup;
+    // Origin-pivot zoom transform for the board (JPro-safe; see constructor).
+    private final Scale boardScale = new Scale(1, 1, 0, 0);
 
     //---------------------------- UI Controls ----------------------------//
     private final Button rollDiceButton;
@@ -88,6 +97,10 @@ public class CatanBoardGameView {
 
         // Combine layers into one render-able board group
         this.boardGroup = new Group(edgeBaseLayer, roadLayer, settlementLayer, edgeClickLayer);
+        // Zoom via an explicit Scale that pivots at the ORIGIN (0,0). Unlike setScaleX/Y
+        // (which pivots at the node's bounds-center and resolves wrong under JPro's headless
+        // renderer), this is bounds-independent, so render and localToScene/sceneToLocal agree.
+        boardGroup.getTransforms().add(boardScale);
 
         // Buttons
         this.rollDiceButton = new Button("Roll Dice");
@@ -112,9 +125,6 @@ public class CatanBoardGameView {
         // Create board and register it with gameplay
         this.board = new Board(gameplay, boardRadius, gameController.getMenuView().getGAME_WIDTH(), gameController.getMenuView().getGAME_HEIGHT());
         gameplay.setBoard(this.board);
-
-        // Scene root container — initially just root
-        this.scene = new Scene(root, gameController.getMenuView().getGAME_WIDTH(), gameController.getMenuView().getGAME_HEIGHT());
 
         // Place Robber
         Tile desertTile = board.getTiles().stream()
@@ -153,8 +163,13 @@ public class CatanBoardGameView {
         // Overlay for when AI is making a move (thinking)
         drawOrDisplay.buildAIOverlay();
         StackPane aiTurnOverlay = drawOrDisplay.buildAIOverlay();
-        StackPane layeredRoot = new StackPane(root, aiTurnOverlay);
-        scene.setRoot(layeredRoot);
+        // Non-blocking modal overlay layer. JPro cannot block the FX thread (showAndWait /
+        // modal Stages), so every dialog is shown here as in-scene content with callbacks.
+        overlayLayer.setVisible(false);
+        overlayLayer.setMouseTransparent(true); // inert while hidden, so board input passes through
+
+        StackPane layeredRoot = new StackPane(root, aiTurnOverlay, overlayLayer);
+        this.rootNode = layeredRoot; // GameController swaps this onto the shared Scene
 
         // Setup KEY buttons clickable ESC, SPACE, ASDW, R,C for reset board etc
         setupInputHandlers(boardWrapper);
@@ -285,16 +300,12 @@ public class CatanBoardGameView {
         // Handle exit confirmation and return to main menu
         exitButton.setOnAction(e -> {
             gameplay.pauseGame(false);
-            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "Are you sure you want to exit to the main menu?", ButtonType.YES, ButtonType.NO);
-            DialogPane pane = alert.getDialogPane();
-            pane.setStyle(BUTTON_STYLE);
-            Optional<ButtonType> result = alert.showAndWait();
-            if (result.isPresent() && result.get() == ButtonType.YES) {
-                gameController.returnToMenu(gameplay.getMenuView());
-            } else {
-                gameController.resumeGame();
-            }
-            exitButton.getScene().getRoot().requestFocus();
+            showConfirmOverlay("Exit Game", "Are you sure you want to exit to the main menu?", "Exit", "Cancel",
+                    () -> gameController.returnToMenu(gameplay.getMenuView()),
+                    () -> {
+                        gameController.resumeGame();
+                        if (gameController.getScene().getRoot() != null) gameController.getScene().getRoot().requestFocus();
+                    });
         });
         // Group all buttons, unified styling
         List<ButtonBase> allButtons = List.of(
@@ -563,7 +574,10 @@ public class CatanBoardGameView {
 
     //boardWrapper The pane that wraps the board and listens for input events
     private void setupInputHandlers(Pane boardWrapper) {
-        scene.setOnKeyPressed(event -> {
+        gameController.getScene().setOnKeyPressed(event -> {
+            // The Scene now persists across menu/options/credits, so ignore board
+            // keys unless the game board screen is actually showing.
+            if (!gameController.isGameScreenActive()) return;
             double step = 30;
             switch (event.getCode()) {
                 case W -> boardGroup.setTranslateY(boardGroup.getTranslateY() - step);
@@ -577,36 +591,25 @@ public class CatanBoardGameView {
                 // Pause the game
                 case SPACE -> {
                     gameplay.pauseGame(false);
-                    Alert pauseAlert = new Alert(Alert.AlertType.INFORMATION, "Game is paused. Press OK to resume.", ButtonType.OK);
-                    pauseAlert.setTitle("Game Paused");
-                    pauseAlert.setHeaderText(null);
-                    // wait for input
-                    pauseAlert.showAndWait();
-                    // only resume after dialog is confirmed
-                    gameController.resumeGame();
-
-                    // Reset focus to scene root
-                    if (scene.getRoot() != null) {
-                        scene.getRoot().requestFocus();
-                    }
+                    showInfoOverlay("Game Paused", "Game is paused. Press OK to resume.", () -> {
+                        gameController.resumeGame();
+                        if (gameController.getScene().getRoot() != null) {
+                            gameController.getScene().getRoot().requestFocus();
+                        }
+                    });
                 }
 
                 // Ask to confirm exit
                 case ESCAPE -> {
                     gameplay.pauseGame(false);
-                    Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "Exit to main menu?", ButtonType.YES, ButtonType.NO);
-                    Optional<ButtonType> result = alert.showAndWait();
-                    if (result.isPresent() && result.get() == ButtonType.YES) {
-                        gameController.returnToMenu(gameplay.getMenuView());
-                    } else {
-                        // resume only if they cancel the exit
-                        gameController.resumeGame();
-
-                        // Reset focus to scene root
-                        if (scene.getRoot() != null) {
-                            scene.getRoot().requestFocus();
-                        }
-                    }
+                    showConfirmOverlay("Exit Game", "Exit to main menu?", "Exit", "Cancel",
+                            () -> gameController.returnToMenu(gameplay.getMenuView()),
+                            () -> {
+                                gameController.resumeGame();
+                                if (gameController.getScene().getRoot() != null) {
+                                    gameController.getScene().getRoot().requestFocus();
+                                }
+                            });
                 }
             }
         });
@@ -639,6 +642,12 @@ public class CatanBoardGameView {
             boardGroup.setTranslateX(initialTranslateX[0] + deltaX);
             boardGroup.setTranslateY(initialTranslateY[0] + deltaY);
         });
+
+        // Route board clicks and hover through the dispatcher, which hit-tests targets in
+        // scene space. A plain click (no drag) fires onMouseClicked; onMouseMoved drives the
+        // hover highlight. This is what makes placement accurate at any zoom/pan under JPro.
+        boardWrapper.setOnMouseClicked(event -> drawOrDisplay.dispatchBoardClick(event));
+        boardWrapper.setOnMouseMoved(event -> drawOrDisplay.dispatchBoardHover(event));
     }
 
     // Create the wrapper Pane and set its preferred size based on the game dimensions
@@ -674,15 +683,23 @@ public class CatanBoardGameView {
 
     private void zoom(Group group, double factor) {
         // Calculate the new scale, then clamp it to stay between 0.5 and 3.0
-        double newScale = group.getScaleX() * factor;
+        double newScale = boardScale.getX() * factor;
         newScale = Math.max(0.5, Math.min(newScale, 3.0));
 
-        // Apply scale uniformly on both axes
-        group.setScaleX(newScale);
-        group.setScaleY(newScale);
+        // Apply on the origin-pivot Scale transform (not setScaleX/Y).
+        boardScale.setX(newScale);
+        boardScale.setY(newScale);
     }
 
     public void centerBoard(Group boardGroup, double screenWidth, double screenHeight) {
+        // Prefer the live Scene size (the real window/browser viewport, which under
+        // JPro is not the fixed 1050x700). Fall back to the passed-in game dimensions
+        // before the Scene has been laid out (width/height still 0).
+        if (gameController.getScene() != null && gameController.getScene().getWidth() > 0) {
+            screenWidth = gameController.getScene().getWidth();
+            screenHeight = gameController.getScene().getHeight();
+        }
+
         // Compute bounds of all tile centers
         double minX = Double.MAX_VALUE, maxX = Double.MIN_VALUE;
         double minY = Double.MAX_VALUE, maxY = Double.MIN_VALUE;
@@ -704,19 +721,139 @@ public class CatanBoardGameView {
         double screenCenterX = usableWidth / 2;
         double screenCenterY = usableHeight / 2;
 
-        double targetTranslateX = screenCenterX - boardCenterX;
-        double targetTranslateY = screenCenterY - boardCenterY;
+        // Set the zoom on the origin-pivot Scale, then translate so the board center lands at
+        // the screen center. Because the Scale pivots at (0,0), a board point p renders at
+        // translate + scale*p, so translate = screenCenter - scale*boardCenter.
+        double scaleTarget = 0.75;
+        boardScale.setX(scaleTarget);
+        boardScale.setY(scaleTarget);
 
-        // Animate translation
+        double targetTranslateX = screenCenterX - scaleTarget * boardCenterX;
+        double targetTranslateY = screenCenterY - scaleTarget * boardCenterY;
+
+        // Animate the translation into place.
         TranslateTransition move = new TranslateTransition(Duration.millis(500), boardGroup);
         move.setToX(targetTranslateX);
         move.setToY(targetTranslateY);
-        // Animate scaling
-        ScaleTransition zoom = new ScaleTransition(Duration.millis(500), boardGroup);
-        zoom.setToX(0.75);
-        zoom.setToY(0.75);
-        SequentialTransition sequence = new SequentialTransition(zoom, move);
-        sequence.play();
+        move.play();
+    }
+
+    //__________________________NON-BLOCKING OVERLAY_____________________________//
+    // These replace showAndWait / modal Stages (which JPro cannot run). A dialog builds
+    // its content, then calls hideOverlay() from its own button/callback when done.
+
+    // Show arbitrary content centered over a dimmed, click-blocking backdrop.
+    public void showOverlay(Node content) {
+        Region dim = new Region();
+        dim.setStyle("-fx-background-color: rgba(0,0,0,0.55);");
+        dim.setOnMouseClicked(javafx.event.Event::consume); // modal: swallow background clicks
+        overlayLayer.getChildren().setAll(dim, content);
+        StackPane.setAlignment(content, Pos.CENTER);
+        overlayLayer.setMouseTransparent(false);
+        overlayLayer.setVisible(true);
+        overlayLayer.toFront();
+    }
+
+    public void hideOverlay() {
+        overlayLayer.getChildren().clear();
+        overlayLayer.setVisible(false);
+        overlayLayer.setMouseTransparent(true);
+    }
+
+    public boolean isOverlayShowing() {
+        return overlayLayer.isVisible();
+    }
+
+    // Styled card container for overlay dialogs.
+    public VBox overlayCard(String title, String message) {
+        VBox card = new VBox(16);
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(28));
+        card.setMaxWidth(460);
+        card.setMaxHeight(Region.USE_PREF_SIZE);
+        card.setStyle("-fx-background-color: #f9f0d2; -fx-background-radius: 12;"
+                + " -fx-border-color: #6E2C00; -fx-border-width: 2; -fx-border-radius: 12;");
+        if (title != null) {
+            Label titleLabel = new Label(title);
+            titleLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 22));
+            titleLabel.setTextFill(Color.web("#6E2C00"));
+            card.getChildren().add(titleLabel);
+        }
+        if (message != null) {
+            Label msg = new Label(message);
+            msg.setWrapText(true);
+            msg.setFont(Font.font("Georgia", 16));
+            msg.setTextFill(Color.web("#3b2b18"));
+            msg.setStyle("-fx-text-alignment: center;");
+            card.getChildren().add(msg);
+        }
+        return card;
+    }
+
+    public Button overlayButton(String text) {
+        Button b = new Button(text);
+        b.setFont(Font.font("Georgia", 16));
+        b.setStyle("-fx-background-color: #6E2C00; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;");
+        b.setOnMouseEntered(e -> b.setStyle("-fx-background-color: #873600; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;"));
+        b.setOnMouseExited(e -> b.setStyle("-fx-background-color: #6E2C00; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;"));
+        return b;
+    }
+
+    // Info/acknowledge dialog (replaces Alert INFORMATION/ERROR with a single OK).
+    public void showInfoOverlay(String title, String message, Runnable onOk) {
+        VBox card = overlayCard(title, message);
+        Button ok = overlayButton("OK");
+        ok.setOnAction(e -> {
+            hideOverlay();
+            if (onOk != null) onOk.run();
+        });
+        card.getChildren().add(ok);
+        showOverlay(card);
+    }
+
+    // Yes/No confirmation (replaces Alert CONFIRMATION whose boolean gated an action).
+    public void showConfirmOverlay(String title, String message, String yesText, String noText,
+                                   Runnable onYes, Runnable onNo) {
+        VBox card = overlayCard(title, message);
+        Button yes = overlayButton(yesText != null ? yesText : "Yes");
+        Button no = overlayButton(noText != null ? noText : "No");
+        yes.setOnAction(e -> {
+            hideOverlay();
+            if (onYes != null) onYes.run();
+        });
+        no.setOnAction(e -> {
+            hideOverlay();
+            if (onNo != null) onNo.run();
+        });
+        HBox buttons = new HBox(16, yes, no);
+        buttons.setAlignment(Pos.CENTER);
+        card.getChildren().add(buttons);
+        showOverlay(card);
+    }
+
+    // Single-choice picker (replaces ChoiceDialog). Invokes onChosen with the selection,
+    // or null if the player cancels.
+    public void showChoiceOverlay(String title, String message, java.util.List<String> options,
+                                  java.util.function.Consumer<String> onChosen) {
+        ComboBox<String> combo = new ComboBox<>();
+        combo.getItems().addAll(options);
+        combo.getSelectionModel().selectFirst();
+        VBox card = overlayCard(title, message);
+        Button confirm = overlayButton("Confirm");
+        Button cancel = overlayButton("Cancel");
+        confirm.setOnAction(e -> {
+            String v = combo.getValue();
+            hideOverlay();
+            if (onChosen != null) onChosen.accept(v);
+        });
+        cancel.setOnAction(e -> {
+            hideOverlay();
+            if (onChosen != null) onChosen.accept(null);
+        });
+        HBox buttons = new HBox(16, confirm, cancel);
+        buttons.setAlignment(Pos.CENTER);
+        card.getChildren().addAll(combo, buttons);
+        showOverlay(card);
     }
 
     //__________________________VIEW UPDATES_____________________________//
@@ -834,8 +971,8 @@ public class CatanBoardGameView {
 
     //__________________________GETTERS_____________________________//
 
-    public Scene getScene() {
-        return scene;
+    public Parent getRootNode() {
+        return rootNode;
     }
     public Robber getRobber() {
         return robber;

@@ -1,5 +1,7 @@
 package org.example.controller;
 
+import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.stage.Stage;
 import org.example.catanboardgameapp.AIOpponent;
 import org.example.catanboardgameapp.Gameplay;
@@ -10,19 +12,44 @@ import org.example.catanboardgameviews.MenuView;
 public class GameController {
 
     private final Stage primaryStage;
+    // Single persistent Scene for the whole app. JPro binds its browser input
+    // mapping to one Scene; swapping the Stage's Scene breaks mouse coordinates,
+    // so every screen change swaps this Scene's ROOT instead of the Scene.
+    private Scene scene;
+    // True only while the game board screen is showing, so the board key handler
+    // (WASD / R / C / SPACE / ESC) stays inert on menu/options/credits screens.
+    private boolean gameScreenActive = false;
     private CatanBoardGameView gameView;
     private TurnController turnController;
     private TradeController tradeController;
     private Gameplay gameplay;
     private BuildController buildController;
     private MenuView menuView;
-    // Set by options menu; default true — do not make final
+    // Set by options menu; default true, do not make final
     private boolean shufflePlayers = true;
 
     //___________________________CONSTRUCTOR_________________________________//
     // Initialize with primary application stage
     public GameController(Stage primaryStage) {
         this.primaryStage = primaryStage;
+    }
+
+    //___________________________SCENE / SCREEN SWAPPING____________________//
+    // Called once at startup to hand the app's single Scene to the controller.
+    public void setScene(Scene scene) {
+        this.scene = scene;
+    }
+    public Scene getScene() {
+        return scene;
+    }
+    // Swap the visible screen without replacing the Scene (JPro-safe).
+    public void setRoot(Parent root) {
+        if (scene != null) {
+            scene.setRoot(root);
+        }
+    }
+    public boolean isGameScreenActive() {
+        return gameScreenActive;
     }
 
     //___________________________FUNCTIONS__________________________________//
@@ -50,7 +77,8 @@ public class GameController {
         gameView.buildGameUI();
         gameplay.initializeDevelopmentCards();
 
-        primaryStage.setScene(gameView.getScene());
+        setRoot(gameView.getRootNode());
+        gameScreenActive = true;
         primaryStage.show();
 
         // Handle first player's initial placement
@@ -76,6 +104,7 @@ public class GameController {
     }
     // Returns to the main menu
     public void returnToMenu(MenuView menuView) {
+        gameScreenActive = false; // board key handler goes inert on the menu
         if (gameplay != null) {
             gameplay.pauseGame(false); // ensures all threads and state are halted
         }
@@ -88,7 +117,8 @@ public class GameController {
         if (gameplay == null || gameView == null) return;
         gameplay.resumeGame(false); // handles AI restart / treads
         gameplay.setCatanBoardGameView(gameView); // restore view reference
-        primaryStage.setScene(gameView.getScene()); // bring game view back
+        setRoot(gameView.getRootNode()); // bring game view back (swap root, keep Scene)
+        gameScreenActive = true;
     }
 
     //___________________________SETTERS__________________________________//

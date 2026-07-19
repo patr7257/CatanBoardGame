@@ -38,7 +38,7 @@ class AITester {
             // initialize javafx
             Platform.startup(() -> {});
         } catch (IllegalStateException e) {
-            // already initialized — ignore
+            // already initialized, ignore
         }
     }
 
@@ -129,8 +129,12 @@ class AITester {
         victim2.getResources().put("Wood", 2);
         List<Player> victims = List.of(victim1, victim2);
 
-        // ai has no resources, so determines strategy = NONE and needs all resource types
-        Player chosen = ai.chooseBestRobberTargetForHardAI(ai, victims);
+        // ai has no resources, so determines strategy = NONE and needs all resource types.
+        // The robber-victim heuristic moved into Robber during the rework; it only uses its
+        // parameters, so call the real method on a mock to avoid Robber's drawing dependencies.
+        Robber robber = mock(Robber.class);
+        when(robber.AIHardChooseBestRobberVictim(any(), anyList())).thenCallRealMethod();
+        Player chosen = robber.AIHardChooseBestRobberVictim(ai, victims);
         // victim1 has 3 resoucres and victim2 on 2, so victim1 should be chosen
         assertEquals(victim1, chosen);
     }
@@ -143,7 +147,7 @@ class AITester {
         // Give resources so canAffordCity == true
         ai.getResources().put("Ore", 3);
         ai.getResources().put("Grain", 2);
-        AIOpponent.Strategy strat = ai.determineStrategy();
+        AIOpponent.Strategy strat = ai.determineStrategy(true);
         assertEquals(AIOpponent.Strategy.CITYUPGRADER, strat);
     }
 
@@ -167,11 +171,11 @@ class AITester {
         LongestRoadManager mgr = mock(LongestRoadManager.class);
         when(mockGameplay.getLongestRoadManager()).thenReturn(mgr);
         when(mgr.getCurrentHolder()).thenReturn(null);
-        when(mgr.calculateLongestRoad(hardAI, List.of(hardAI, other))).thenReturn(4);
+        when(mgr.calculateLongestRoad(hardAI)).thenReturn(4);
         // give road resources
         hardAI.getResources().put("Brick", 1);
         hardAI.getResources().put("Wood", 1);
         // strategy should now be longest road
-        assertEquals(AIOpponent.Strategy.LONGESTROAD, hardAI.determineStrategy());
+        assertEquals(AIOpponent.Strategy.LONGESTROAD, hardAI.determineStrategy(true));
     }
 }
