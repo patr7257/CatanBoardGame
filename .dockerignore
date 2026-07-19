@@ -1,0 +1,10 @@
+target/
+.git/
+.github/
+.idea/
+*.iml
+RUNNING_PID
+logs/
+.claude/
+*.md
+!README.md
