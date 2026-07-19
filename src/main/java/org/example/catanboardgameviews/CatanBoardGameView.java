@@ -9,6 +9,7 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
@@ -52,6 +53,8 @@ public class CatanBoardGameView {
     // its root node, which GameController swaps onto that Scene.
     private Parent rootNode;
     private final BorderPane root;
+    // Non-blocking modal overlay (replaces showAndWait / modal Stages under JPro).
+    private final StackPane overlayLayer = new StackPane();
 
     //---------------------------- Render Layers ----------------------------//
     private final Group edgeBaseLayer;
@@ -160,7 +163,12 @@ public class CatanBoardGameView {
         // Overlay for when AI is making a move (thinking)
         drawOrDisplay.buildAIOverlay();
         StackPane aiTurnOverlay = drawOrDisplay.buildAIOverlay();
-        StackPane layeredRoot = new StackPane(root, aiTurnOverlay);
+        // Non-blocking modal overlay layer. JPro cannot block the FX thread (showAndWait /
+        // modal Stages), so every dialog is shown here as in-scene content with callbacks.
+        overlayLayer.setVisible(false);
+        overlayLayer.setMouseTransparent(true); // inert while hidden, so board input passes through
+
+        StackPane layeredRoot = new StackPane(root, aiTurnOverlay, overlayLayer);
         this.rootNode = layeredRoot; // GameController swaps this onto the shared Scene
 
         // Setup KEY buttons clickable ESC, SPACE, ASDW, R,C for reset board etc
@@ -292,16 +300,12 @@ public class CatanBoardGameView {
         // Handle exit confirmation and return to main menu
         exitButton.setOnAction(e -> {
             gameplay.pauseGame(false);
-            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "Are you sure you want to exit to the main menu?", ButtonType.YES, ButtonType.NO);
-            DialogPane pane = alert.getDialogPane();
-            pane.setStyle(BUTTON_STYLE);
-            Optional<ButtonType> result = alert.showAndWait();
-            if (result.isPresent() && result.get() == ButtonType.YES) {
-                gameController.returnToMenu(gameplay.getMenuView());
-            } else {
-                gameController.resumeGame();
-            }
-            exitButton.getScene().getRoot().requestFocus();
+            showConfirmOverlay("Exit Game", "Are you sure you want to exit to the main menu?", "Exit", "Cancel",
+                    () -> gameController.returnToMenu(gameplay.getMenuView()),
+                    () -> {
+                        gameController.resumeGame();
+                        if (gameController.getScene().getRoot() != null) gameController.getScene().getRoot().requestFocus();
+                    });
         });
         // Group all buttons, unified styling
         List<ButtonBase> allButtons = List.of(
@@ -587,36 +591,25 @@ public class CatanBoardGameView {
                 // Pause the game
                 case SPACE -> {
                     gameplay.pauseGame(false);
-                    Alert pauseAlert = new Alert(Alert.AlertType.INFORMATION, "Game is paused. Press OK to resume.", ButtonType.OK);
-                    pauseAlert.setTitle("Game Paused");
-                    pauseAlert.setHeaderText(null);
-                    // wait for input
-                    pauseAlert.showAndWait();
-                    // only resume after dialog is confirmed
-                    gameController.resumeGame();
-
-                    // Reset focus to scene root
-                    if (gameController.getScene().getRoot() != null) {
-                        gameController.getScene().getRoot().requestFocus();
-                    }
+                    showInfoOverlay("Game Paused", "Game is paused. Press OK to resume.", () -> {
+                        gameController.resumeGame();
+                        if (gameController.getScene().getRoot() != null) {
+                            gameController.getScene().getRoot().requestFocus();
+                        }
+                    });
                 }
 
                 // Ask to confirm exit
                 case ESCAPE -> {
                     gameplay.pauseGame(false);
-                    Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "Exit to main menu?", ButtonType.YES, ButtonType.NO);
-                    Optional<ButtonType> result = alert.showAndWait();
-                    if (result.isPresent() && result.get() == ButtonType.YES) {
-                        gameController.returnToMenu(gameplay.getMenuView());
-                    } else {
-                        // resume only if they cancel the exit
-                        gameController.resumeGame();
-
-                        // Reset focus to scene root
-                        if (gameController.getScene().getRoot() != null) {
-                            gameController.getScene().getRoot().requestFocus();
-                        }
-                    }
+                    showConfirmOverlay("Exit Game", "Exit to main menu?", "Exit", "Cancel",
+                            () -> gameController.returnToMenu(gameplay.getMenuView()),
+                            () -> {
+                                gameController.resumeGame();
+                                if (gameController.getScene().getRoot() != null) {
+                                    gameController.getScene().getRoot().requestFocus();
+                                }
+                            });
                 }
             }
         });
@@ -743,6 +736,124 @@ public class CatanBoardGameView {
         move.setToX(targetTranslateX);
         move.setToY(targetTranslateY);
         move.play();
+    }
+
+    //__________________________NON-BLOCKING OVERLAY_____________________________//
+    // These replace showAndWait / modal Stages (which JPro cannot run). A dialog builds
+    // its content, then calls hideOverlay() from its own button/callback when done.
+
+    // Show arbitrary content centered over a dimmed, click-blocking backdrop.
+    public void showOverlay(Node content) {
+        Region dim = new Region();
+        dim.setStyle("-fx-background-color: rgba(0,0,0,0.55);");
+        dim.setOnMouseClicked(javafx.event.Event::consume); // modal: swallow background clicks
+        overlayLayer.getChildren().setAll(dim, content);
+        StackPane.setAlignment(content, Pos.CENTER);
+        overlayLayer.setMouseTransparent(false);
+        overlayLayer.setVisible(true);
+        overlayLayer.toFront();
+    }
+
+    public void hideOverlay() {
+        overlayLayer.getChildren().clear();
+        overlayLayer.setVisible(false);
+        overlayLayer.setMouseTransparent(true);
+    }
+
+    public boolean isOverlayShowing() {
+        return overlayLayer.isVisible();
+    }
+
+    // Styled card container for overlay dialogs.
+    public VBox overlayCard(String title, String message) {
+        VBox card = new VBox(16);
+        card.setAlignment(Pos.CENTER);
+        card.setPadding(new Insets(28));
+        card.setMaxWidth(460);
+        card.setMaxHeight(Region.USE_PREF_SIZE);
+        card.setStyle("-fx-background-color: #f9f0d2; -fx-background-radius: 12;"
+                + " -fx-border-color: #6E2C00; -fx-border-width: 2; -fx-border-radius: 12;");
+        if (title != null) {
+            Label titleLabel = new Label(title);
+            titleLabel.setFont(Font.font("Georgia", FontWeight.BOLD, 22));
+            titleLabel.setTextFill(Color.web("#6E2C00"));
+            card.getChildren().add(titleLabel);
+        }
+        if (message != null) {
+            Label msg = new Label(message);
+            msg.setWrapText(true);
+            msg.setFont(Font.font("Georgia", 16));
+            msg.setTextFill(Color.web("#3b2b18"));
+            msg.setStyle("-fx-text-alignment: center;");
+            card.getChildren().add(msg);
+        }
+        return card;
+    }
+
+    public Button overlayButton(String text) {
+        Button b = new Button(text);
+        b.setFont(Font.font("Georgia", 16));
+        b.setStyle("-fx-background-color: #6E2C00; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;");
+        b.setOnMouseEntered(e -> b.setStyle("-fx-background-color: #873600; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;"));
+        b.setOnMouseExited(e -> b.setStyle("-fx-background-color: #6E2C00; -fx-text-fill: #fceabb; -fx-background-radius: 8; -fx-padding: 8 22 8 22;"));
+        return b;
+    }
+
+    // Info/acknowledge dialog (replaces Alert INFORMATION/ERROR with a single OK).
+    public void showInfoOverlay(String title, String message, Runnable onOk) {
+        VBox card = overlayCard(title, message);
+        Button ok = overlayButton("OK");
+        ok.setOnAction(e -> {
+            hideOverlay();
+            if (onOk != null) onOk.run();
+        });
+        card.getChildren().add(ok);
+        showOverlay(card);
+    }
+
+    // Yes/No confirmation (replaces Alert CONFIRMATION whose boolean gated an action).
+    public void showConfirmOverlay(String title, String message, String yesText, String noText,
+                                   Runnable onYes, Runnable onNo) {
+        VBox card = overlayCard(title, message);
+        Button yes = overlayButton(yesText != null ? yesText : "Yes");
+        Button no = overlayButton(noText != null ? noText : "No");
+        yes.setOnAction(e -> {
+            hideOverlay();
+            if (onYes != null) onYes.run();
+        });
+        no.setOnAction(e -> {
+            hideOverlay();
+            if (onNo != null) onNo.run();
+        });
+        HBox buttons = new HBox(16, yes, no);
+        buttons.setAlignment(Pos.CENTER);
+        card.getChildren().add(buttons);
+        showOverlay(card);
+    }
+
+    // Single-choice picker (replaces ChoiceDialog). Invokes onChosen with the selection,
+    // or null if the player cancels.
+    public void showChoiceOverlay(String title, String message, java.util.List<String> options,
+                                  java.util.function.Consumer<String> onChosen) {
+        ComboBox<String> combo = new ComboBox<>();
+        combo.getItems().addAll(options);
+        combo.getSelectionModel().selectFirst();
+        VBox card = overlayCard(title, message);
+        Button confirm = overlayButton("Confirm");
+        Button cancel = overlayButton("Cancel");
+        confirm.setOnAction(e -> {
+            String v = combo.getValue();
+            hideOverlay();
+            if (onChosen != null) onChosen.accept(v);
+        });
+        cancel.setOnAction(e -> {
+            hideOverlay();
+            if (onChosen != null) onChosen.accept(null);
+        });
+        HBox buttons = new HBox(16, confirm, cancel);
+        buttons.setAlignment(Pos.CENTER);
+        card.getChildren().addAll(combo, buttons);
+        showOverlay(card);
     }
 
     //__________________________VIEW UPDATES_____________________________//

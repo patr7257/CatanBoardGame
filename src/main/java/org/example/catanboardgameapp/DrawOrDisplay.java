@@ -395,10 +395,7 @@ public class DrawOrDisplay {
             double gameHeight,
             Runnable onClose
     ) {
-        Stage popup = new Stage();
-        popup.initModality(Modality.APPLICATION_MODAL);
-        popup.initStyle(StageStyle.UNDECORATED);
-        popup.setTitle("Game Over");
+        CatanBoardGameView view = gameplay.getCatanBoardGameView();
 
         VBox content = new VBox(15);
         content.setPadding(new Insets(15));
@@ -492,20 +489,15 @@ public class DrawOrDisplay {
         -fx-text-fill: black;
     """);
         closeBtn.setOnAction(e -> {
-            popup.close();
-            onClose.run();
+            view.hideOverlay();
+            if (onClose != null) onClose.run();
         });
         content.getChildren().addAll(header, scrollPane, closeBtn);
-        Scene scene = new Scene(content, gameWidth, gameHeight);
-        popup.setScene(scene);
-        popup.show();
+        content.setMaxWidth(560);
+        view.showOverlay(content);
     }
 
     public void showBuildingCostsPopup() {
-        Stage popup = new Stage();
-        popup.initModality(Modality.APPLICATION_MODAL);
-        popup.setTitle("Building Costs");
-
         InputStream imageStream = CatanBoardGameView.class.getResourceAsStream("/UI/catanBuildingCosts.png");
         if (imageStream == null) {
             System.err.println("Could not load building_costs.png");
@@ -515,50 +507,35 @@ public class DrawOrDisplay {
         imageView.setPreserveRatio(true);
         imageView.setFitWidth(400);
 
-        VBox layout = new VBox(imageView);
-        layout.setPadding(new Insets(10));
-
-        Scene scene = new Scene(layout);
-        popup.setScene(scene);
-        popup.showAndWait();
+        CatanBoardGameView view = gameplay.getCatanBoardGameView();
+        VBox card = view.overlayCard("Building Costs", null);
+        Button close = view.overlayButton("Close");
+        close.setOnAction(e -> view.hideOverlay());
+        card.getChildren().addAll(imageView, close);
+        view.showOverlay(card);
     }
 
-    public Optional<Player> showRobberVictimDialog(List<Player> victims) {
-        if (victims == null || victims.isEmpty()) return Optional.empty();
-
-        Dialog<Player> dialog = new Dialog<>();
-        dialog.setTitle("Choose a player to steal from");
-        dialog.setHeaderText("Select a player with a city or settlement on this tile:");
-        dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.initStyle(StageStyle.UNDECORATED); // Optional: remove window decorations
-
-        // Disable default close behavior
-        Stage stage = (Stage) dialog.getDialogPane().getScene().getWindow();
-        stage.setOnCloseRequest(Event::consume);
-
-        // UI Setup
+    // Non-blocking robber-victim picker. Invokes onChosen with the selected player.
+    public void showRobberVictimDialog(List<Player> victims, Consumer<Player> onChosen) {
+        if (victims == null || victims.isEmpty()) {
+            if (onChosen != null) onChosen.accept(null);
+            return;
+        }
         ComboBox<Player> comboBox = new ComboBox<>();
         comboBox.getItems().addAll(victims);
         comboBox.getSelectionModel().selectFirst();
 
-        dialog.getDialogPane().setContent(new VBox(10,
-                new Label("Player:"), comboBox
-        ));
-
-        ButtonType confirmType = new ButtonType("Steal", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().add(confirmType);
-
-        Node confirmButton = dialog.getDialogPane().lookupButton(confirmType);
-        confirmButton.setDisable(false); // Allow clicking, but we can add validation if needed
-
-        dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == confirmType) {
-                return comboBox.getValue();
-            }
-            return null; // Not possible unless dialog is forcibly closed
+        CatanBoardGameView view = gameplay.getCatanBoardGameView();
+        VBox card = view.overlayCard("Steal a resource",
+                "Select a player with a settlement or city on this tile:");
+        Button steal = view.overlayButton("Steal");
+        steal.setOnAction(e -> {
+            Player chosen = comboBox.getValue();
+            view.hideOverlay();
+            if (onChosen != null) onChosen.accept(chosen);
         });
-        Optional<Player> result = dialog.showAndWait();
-        return result;
+        card.getChildren().addAll(comboBox, steal);
+        view.showOverlay(card);
     }
 
     public void notEnoughResourcesPopup(String message) {
@@ -600,152 +577,83 @@ public class DrawOrDisplay {
         showAlert(Alert.AlertType.WARNING, "Action Required: Development Card", "Complete your development card action first.", "You must finish using your current development card before performing any other actions.", null);
     }
 
-    public Map<String, Integer> showDiscardDialog(Player player, int toDiscard, Map<String, Integer> playerResources, Gameplay gameplay) {
+    public void showDiscardDialog(Player player, int toDiscard, Map<String, Integer> playerResources,
+                                  Gameplay gameplay, Consumer<Map<String, Integer>> onConfirm) {
         List<String> resources = new ArrayList<>(playerResources.keySet());
-        return showResourceSelectionDialog(
+        showResourceSelectionDialog(
                 "Discard Resources",
                 player + ", you must discard " + toDiscard + " resource cards.",
                 resources,
                 toDiscard,
                 false,       // allowAutoSelection
                 null,                        // auto-selection function
-                playerResources
+                playerResources,
+                onConfirm
         );
     }
 
-    public String showMonopolyDialog() {
+    // Non-blocking monopoly picker. Invokes onChosen with the selected resource name.
+    public void showMonopolyDialog(Consumer<String> onChosen) {
         List<String> resources = Arrays.asList("Ore", "Wood", "Brick", "Grain", "Wool");
-
-        Dialog<String> dialog = new Dialog<>();
-        dialog.setTitle("Monopoly");
-        dialog.setHeaderText("Select a resource to monopolize:");
-        dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.initStyle(StageStyle.UNDECORATED);
-        DialogPane pane = dialog.getDialogPane();
-        pane.setStyle("""
-            -fx-background-color: linear-gradient(to bottom, #f9ecd1, #d2a86e);
-            -fx-border-color: #8c5b1a;
-            -fx-border-width: 2;
-            -fx-border-radius: 8;
-            -fx-background-radius: 8;
-            -fx-font-family: 'Georgia';
-            -fx-font-size: 14px;
-            -fx-text-fill: #3e2b1f;
-        """);
-        // Prevent closing with X button
-        Stage stage = (Stage) dialog.getDialogPane().getScene().getWindow();
-        stage.setOnCloseRequest(Event::consume);
-
         ComboBox<String> comboBox = new ComboBox<>();
         comboBox.getItems().addAll(resources);
         comboBox.getSelectionModel().selectFirst();
 
-        dialog.getDialogPane().setContent(new VBox(10,
-                new Label("Resource:"), comboBox
-        ));
-
-        ButtonType confirmType = new ButtonType("Confirm", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().add(confirmType);
-
-        Node confirmButton = dialog.getDialogPane().lookupButton(confirmType);
-        confirmButton.setDisable(false); // Always enabled (1 option only)
-
-        dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == confirmType) {
-                return comboBox.getValue();
-            }
-            return null;
+        CatanBoardGameView view = gameplay.getCatanBoardGameView();
+        VBox card = view.overlayCard("Monopoly", "Select a resource to monopolize:");
+        Button confirm = view.overlayButton("Confirm");
+        confirm.setOnAction(e -> {
+            String chosen = comboBox.getValue();
+            view.hideOverlay();
+            if (onChosen != null) onChosen.accept(chosen);
         });
-
-        Optional<String> result = dialog.showAndWait();
-        return result.orElse(null);
+        card.getChildren().addAll(comboBox, confirm);
+        view.showOverlay(card);
     }
 
-    public Map<String, Integer> showYearOfPlentyDialog(Map<String, Integer> playerResources) {
+    public void showYearOfPlentyDialog(Map<String, Integer> playerResources, Consumer<Map<String, Integer>> onConfirm) {
         List<String> resources = Arrays.asList("Ore", "Wood", "Brick", "Grain", "Wool");
-        return showResourceSelectionDialog(
+        showResourceSelectionDialog(
                 "Year of Plenty",
                 "Select exactly 2 resources to gain from the bank:",
                 resources,
                 2,
                 false,
                 null,
-                null           // unlimited, you can pick any resource
+                null,          // unlimited, you can pick any resource
+                onConfirm
         );
     }
 
     //___________________________________POPUP HELPER FUNCTIONS____________________________________//
+    // Non-blocking info/acknowledge popup via the in-scene overlay (JPro-safe).
     public void showAlert(Alert.AlertType type, String title, String header, String content, Runnable onClose) {
-        Platform.runLater(() -> {
-            Alert alert = new Alert(type);
-            alert.setTitle(title);
-            alert.setHeaderText(header);
-            alert.setContentText(content);
-            alert.setResizable(true);
-            alert.getDialogPane().setPrefWidth(400);
-            DialogPane pane = alert.getDialogPane();
-            pane.setStyle("""
-                -fx-background-color: linear-gradient(to bottom, #f9ecd1, #d2a86e);
-                -fx-border-color: #8c5b1a;
-                -fx-border-width: 2;
-                -fx-font-family: 'Georgia';
-                -fx-font-size: 13px;
-                -fx-text-fill: #3e2b1f;
-            """);
-            if (onClose != null) {
-                alert.setOnHidden(e -> onClose.run());
-            }
-            alert.showAndWait();
-        });
+        String message = (header != null && !header.isBlank() ? header + "\n\n" : "")
+                + (content != null ? content : "");
+        Platform.runLater(() -> gameplay.getCatanBoardGameView().showInfoOverlay(title, message, onClose));
     }
+
     public void showCustomPopup(String title, String message, boolean runLater) {
-        Runnable task = () -> {
-            Stage popup = new Stage();
-            popup.initModality(Modality.APPLICATION_MODAL);
-            popup.setTitle(title);
-
-            VBox box = new VBox(10);
-            box.setPadding(new Insets(20));
-            box.setAlignment(Pos.CENTER);
-            box.setStyle("""
-                -fx-background-color: linear-gradient(to bottom, #f9ecd1, #d2a86e);
-                -fx-border-color: #8c5b1a;
-                -fx-border-width: 2;
-                -fx-border-radius: 10;
-                -fx-background-radius: 10;
-            """);
-            Label label = new Label(message);
-            Button closeButton = new Button("OK");
-            closeButton.setOnAction(e -> popup.close());
-            closeButton.setFont(Font.font("Georgia", FontWeight.BOLD, 13));
-
-            box.getChildren().addAll(label, closeButton);
-
-            Scene scene = new Scene(box);
-            popup.setScene(scene);
-            popup.showAndWait();
-        };
-
+        Runnable task = () -> gameplay.getCatanBoardGameView().showInfoOverlay(title, message, null);
         if (runLater) {
             Platform.runLater(task);
         } else {
             task.run();
         }
     }
-    // Helper function to create NON-closable Dialog boxes for multiple recourse selections
-    private Map<String, Integer> showResourceSelectionDialog(
+    // Non-blocking resource selection overlay (multiple +/- counters). Invokes onConfirm
+    // with the chosen resource->count map when the player confirms.
+    private void showResourceSelectionDialog(
             String title,
             String message,
             List<String> resources,
             int maxSelection,
             boolean allowAutoSelection,
             Supplier<Map<String, Integer>> autoSelectionSupplier,
-            Map<String, Integer> ownedResourceMap
+            Map<String, Integer> ownedResourceMap,
+            Consumer<Map<String, Integer>> onConfirm
     ) {
-        Stage dialogStage = new Stage();
-        dialogStage.initModality(Modality.APPLICATION_MODAL);
-        dialogStage.initStyle(StageStyle.UNDECORATED);
-        dialogStage.setTitle(title);
+        CatanBoardGameView view = gameplay.getCatanBoardGameView();
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -761,7 +669,7 @@ public class DrawOrDisplay {
 
         Map<String, Integer> selection = new HashMap<>();
         Map<String, Text> counterTexts = new HashMap<>();
-        Button confirmButton = new Button("Confirm");
+        Button confirmButton = view.overlayButton("Confirm");
         confirmButton.setDisable(true);
 
         int row = 0;
@@ -812,41 +720,32 @@ public class DrawOrDisplay {
             grid.addRow(row++, label, minus, counter, plus, ownedLabel);
         }
 
-        final Map<String, Integer>[] result = new Map[]{null};
         confirmButton.setOnAction(e -> {
-            result[0] = new HashMap<>(selection);
+            Map<String, Integer> chosen = new HashMap<>(selection);
             gameplay.resumeGame(true);
-            dialogStage.close();
+            view.hideOverlay();
+            if (onConfirm != null) onConfirm.accept(chosen);
         });
 
-        VBox container = new VBox(15, new Text(message), grid);
         HBox buttons = new HBox(10, confirmButton);
-
-        container.setStyle("""
-        -fx-background-color: linear-gradient(to bottom, #f9ecd1, #d2a86e);
-        -fx-border-color: #8c5b1a;
-        -fx-border-width: 2;
-        -fx-border-radius: 10;
-        -fx-background-radius: 10;
-    """);
+        buttons.setAlignment(Pos.CENTER);
 
         if (allowAutoSelection && autoSelectionSupplier != null) {
-            Button autoButton = new Button("Auto-Discard");
+            Button autoButton = view.overlayButton("Auto-Discard");
             autoButton.setOnAction(e -> {
                 Map<String, Integer> autoResult = autoSelectionSupplier.get();
                 if (autoResult != null && !autoResult.isEmpty()) {
-                    result[0] = new HashMap<>(autoResult);
-                    dialogStage.close();
+                    gameplay.resumeGame(true);
+                    view.hideOverlay();
+                    if (onConfirm != null) onConfirm.accept(new HashMap<>(autoResult));
                 }
             });
             buttons.getChildren().add(autoButton);
         }
 
-        container.getChildren().add(buttons);
-        container.setPadding(new Insets(15));
-        dialogStage.setScene(new Scene(container));
-        dialogStage.showAndWait();
-        return result[0];
+        VBox card = view.overlayCard(title, message);
+        card.getChildren().addAll(grid, buttons);
+        view.showOverlay(card);
     }
 
 

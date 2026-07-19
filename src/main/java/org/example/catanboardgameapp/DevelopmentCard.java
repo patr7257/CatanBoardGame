@@ -100,12 +100,13 @@ public class DevelopmentCard {
     public void playMonopolyCardAsPlayer(Player player) {
         startPlayingCard();
         Player currentPlayer = gameplay.getCurrentPlayer();
-        String chosenResource = drawOrDisplay.showMonopolyDialog();
-        if (chosenResource == null) return;
-        int taken = monopolizeResource(chosenResource, currentPlayer);
-        view.logToGameLog(player + " played a Monopoly Development Card and took " + taken + " " + chosenResource + " from other players!");
-        view.refreshSidebar();
-        finishPlayingCard();
+        drawOrDisplay.showMonopolyDialog(chosenResource -> {
+            if (chosenResource == null) return;
+            int taken = monopolizeResource(chosenResource, currentPlayer);
+            view.logToGameLog(player + " played a Monopoly Development Card and took " + taken + " " + chosenResource + " from other players!");
+            view.refreshSidebar();
+            finishPlayingCard();
+        });
     }
     private void playMonopolyCardAsAI(AIOpponent ai) {
         String chosenResource = chooseSmartResourceToMonopoly(gameplay, ai);
@@ -147,9 +148,15 @@ public class DevelopmentCard {
     private void playYearOfPlentyCardAsPlayer(Player player) {
         startPlayingCard();
         Player currentPlayer = gameplay.getCurrentPlayer();
-        Map<String, Integer> selected = (currentPlayer instanceof AIOpponent ai && ai.getStrategyLevel() == AIOpponent.StrategyLevel.HARD)
-                ? ai.chooseResourcesForYearOfPlenty()
-                : drawOrDisplay.showYearOfPlentyDialog(currentPlayer.getResources());
+        if (currentPlayer instanceof AIOpponent ai && ai.getStrategyLevel() == AIOpponent.StrategyLevel.HARD) {
+            applyYearOfPlenty(player, currentPlayer, ai.chooseResourcesForYearOfPlenty());
+        } else {
+            drawOrDisplay.showYearOfPlentyDialog(currentPlayer.getResources(),
+                    selected -> applyYearOfPlenty(player, currentPlayer, selected));
+        }
+    }
+
+    private void applyYearOfPlenty(Player player, Player currentPlayer, Map<String, Integer> selected) {
         if (selected != null) {
             addResourcesToPlayer(currentPlayer, selected);
             String gained = selected.entrySet().stream()

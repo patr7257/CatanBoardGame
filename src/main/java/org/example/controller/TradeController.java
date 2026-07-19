@@ -70,42 +70,30 @@ public class TradeController {
                     drawOrDisplay.showTradeError("You don't have enough resources to trade based on your harbors.");
                     return;
                 }
-                // Dialog to choose which resource to give
-                ChoiceDialog<String> giveDialog = new ChoiceDialog<>(tradeableResources.get(0), tradeableResources);
-                giveDialog.setTitle("Harbor Trade");
-                giveDialog.setHeaderText("Select the resource you want to give:");
-                giveDialog.setContentText("Give:");
-                gameplay.getCatanBoardGameView().styleDialog(giveDialog);
-                Optional<String> giveResult = giveDialog.showAndWait();
-                if (giveResult.isEmpty()) return;
+                // Choose which resource to give, then (non-blocking) which to receive.
+                gameplay.getCatanBoardGameView().showChoiceOverlay(
+                        "Harbor Trade", "Select the resource you want to give:", tradeableResources,
+                        giveResource -> {
+                            if (giveResource == null) return;
+                            int ratio = bestRatios.getOrDefault(giveResource, 4);
 
-                String giveResource = giveResult.get();
-                int ratio = bestRatios.getOrDefault(giveResource, 4);
+                            List<String> receiveOptions = new ArrayList<>(Arrays.asList("Ore", "Wood", "Brick", "Grain", "Wool"));
+                            receiveOptions.remove(giveResource);
 
-                List<String> receiveOptions = new ArrayList<>(Arrays.asList("Ore", "Wood", "Brick", "Grain", "Wool"));
-                receiveOptions.remove(giveResource);
-
-                // Dialog to choose which resource to receive
-                ChoiceDialog<String> receiveDialog = new ChoiceDialog<>(receiveOptions.get(0), receiveOptions);
-                receiveDialog.setTitle("Harbor Trade");
-                receiveDialog.setHeaderText("Select the resource you want to receive:");
-                receiveDialog.setContentText("Receive:");
-                gameplay.getCatanBoardGameView().styleDialog(receiveDialog);
-                Optional<String> receiveResult = receiveDialog.showAndWait();
-                if (receiveResult.isEmpty()) return;
-
-                String receiveResource = receiveResult.get();
-
-                // Check if player has enough to trade
-                if (!gameplay.canRemoveResource(giveResource, ratio)) {
-                    drawOrDisplay.showTradeError("You don't have enough " + giveResource + " to trade (requires " + ratio + ").");
-                    return;
-                }
-                // Perform the trade
-                gameplay.removeResource(giveResource, ratio);
-                gameplay.addResource(receiveResource, 1);
-                gameplay.getCatanBoardGameView().logToGameLog(gameplay.getCurrentPlayer() + " traded " + ratio + " " + giveResource + " for 1 " + receiveResource);
-                gameplay.getCatanBoardGameView().refreshSidebar();
+                            gameplay.getCatanBoardGameView().showChoiceOverlay(
+                                    "Harbor Trade", "Select the resource you want to receive:", receiveOptions,
+                                    receiveResource -> {
+                                        if (receiveResource == null) return;
+                                        if (!gameplay.canRemoveResource(giveResource, ratio)) {
+                                            drawOrDisplay.showTradeError("You don't have enough " + giveResource + " to trade (requires " + ratio + ").");
+                                            return;
+                                        }
+                                        gameplay.removeResource(giveResource, ratio);
+                                        gameplay.addResource(receiveResource, 1);
+                                        gameplay.getCatanBoardGameView().logToGameLog(gameplay.getCurrentPlayer() + " traded " + ratio + " " + giveResource + " for 1 " + receiveResource);
+                                        gameplay.getCatanBoardGameView().refreshSidebar();
+                                    });
+                        });
             }
         });
     }

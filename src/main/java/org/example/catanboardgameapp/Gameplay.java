@@ -242,18 +242,16 @@ public class Gameplay {
             stopAllAIThreads();
 
             // Alert player before exiting
-            catanBoardGameView.runOnFX(() -> {
-                Alert alert = new Alert(Alert.AlertType.ERROR, error, ButtonType.OK);
-                alert.setTitle("Game Crash");
-                alert.setHeaderText("Too many turns! Returning to the main menu.");
-                alert.showAndWait();
-                // Return to the main menu instead of killing the JVM.
-                // Under JPro one JVM serves every browser session, so System.exit would
-                // terminate the whole server, not just this game.
-                if (menuView != null) {
-                    menuView.showMainMenu();
-                }
-            });
+            // Non-blocking overlay, then return to the main menu instead of killing the JVM
+            // (under JPro one JVM serves every browser session, so System.exit would end all).
+            catanBoardGameView.runOnFX(() ->
+                    catanBoardGameView.showInfoOverlay("Game Crash",
+                            "Too many turns! Returning to the main menu.\n\n" + error,
+                            () -> {
+                                if (menuView != null) {
+                                    menuView.showMainMenu();
+                                }
+                            }));
         }
     }
 
