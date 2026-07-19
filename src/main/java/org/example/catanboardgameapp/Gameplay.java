@@ -245,10 +245,14 @@ public class Gameplay {
             catanBoardGameView.runOnFX(() -> {
                 Alert alert = new Alert(Alert.AlertType.ERROR, error, ButtonType.OK);
                 alert.setTitle("Game Crash");
-                alert.setHeaderText("Too many turns! Game is terminating.");
+                alert.setHeaderText("Too many turns! Returning to the main menu.");
                 alert.showAndWait();
-                // Now forcefully exit
-                System.exit(1);
+                // Return to the main menu instead of killing the JVM.
+                // Under JPro one JVM serves every browser session, so System.exit would
+                // terminate the whole server, not just this game.
+                if (menuView != null) {
+                    menuView.showMainMenu();
+                }
             });
         }
     }
@@ -583,7 +587,7 @@ public class Gameplay {
         }
 
         // 4. During the main phase, settlement must connect to one of the
-        //    current player’s roads – unless the caller asked us to ignore
+        //    current player's roads, unless the caller asked us to ignore
         //    that rule (e.g. for hypothetical scoring)
         if (!ignoreRoadConnection && !isInInitialPhase()) {
             boolean hasOwnAdjacentRoad = getCurrentPlayer().getRoads()

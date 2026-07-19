@@ -15,6 +15,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.*;
@@ -137,7 +138,7 @@ public class DrawOrDisplay {
         InputStream stream = CatanBoardGameView.class.getResourceAsStream(path);
         if (stream == null) {
             System.err.println("Could not load image: " + path);
-            return new Image("/Icons/error.png");
+            return new WritableImage(1, 1); // harmless transparent placeholder (no error.png asset exists)
         }
         return new Image(stream);
     }
@@ -146,7 +147,7 @@ public class DrawOrDisplay {
         thinkingLabel.setStyle("-fx-font-size: 26px; -fx-text-fill: white; -fx-font-weight: bold;");
         thinkingLabel.setOpacity(0.85);
 
-        Image img = new Image(getClass().getResource("/icons/robot_think.png").toExternalForm());
+        Image img = new Image(getClass().getResource("/Icons/robot_think.png").toExternalForm());
         thinkingImage = new ImageView(img);
         thinkingImage.setFitWidth(120);
         thinkingImage.setFitHeight(120);
@@ -554,7 +555,7 @@ public class DrawOrDisplay {
                 2,
                 false,
                 null,
-                null           // unlimited – you can pick any resource
+                null           // unlimited, you can pick any resource
         );
     }
 

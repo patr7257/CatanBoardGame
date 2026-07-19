@@ -3,6 +3,7 @@ package org.example.catanboardgameapp;
 import javafx.geometry.Point2D;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
 import javafx.scene.paint.Color;
 import org.example.catanboardgameviews.CatanBoardGameView;
 
@@ -89,7 +90,7 @@ public class Tile {
                 default     -> "/Icons/error.png"; // fallback for safety
             };
             InputStream stream = CatanBoardGameView.class.getResourceAsStream(filename);
-            return stream == null ? new Image("/Icons/error.png") : new Image(stream);
+            return stream == null ? new WritableImage(1, 1) : new Image(stream);
         });
         ImageView iv = new ImageView(image);
         double w = Math.sqrt(3) * hexSize, h = 2 * hexSize;
