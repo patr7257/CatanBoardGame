@@ -48,10 +48,8 @@ public class MenuView {
     //__________________________MAIN MENU_____________________________//
     public void showMainMenu() {
         VBox menuLayout = createMenuLayout();
-        Scene menuScene = new Scene(menuLayout, 1050, 700);
-        primaryStage.setScene(menuScene);
+        gameController.setRoot(menuLayout); // swap root on the shared Scene (JPro-safe)
         primaryStage.setTitle("Catan Board Game");
-        primaryStage.show();
     }
 
     private VBox createMenuLayout() {
@@ -143,7 +141,7 @@ public class MenuView {
         optionsTitle.setFont(new Font("Georgia", 28));
         optionsTitle.setTextFill(Color.DARKRED);
 
-        Label totalNote = new Label("Choose 2–6 Total Players");
+        Label totalNote = new Label("Choose 2-6 Total Players");
         totalNote.setFont(Font.font("Georgia", 16));
         totalNote.setTextFill(Color.DARKRED);
 
@@ -256,8 +254,7 @@ public class MenuView {
         Button accept = acceptButton(aiSpeedDropdown);
 
         optionsLayout.getChildren().addAll(optionsTitle, totalNote, grid,shufflePlayersCheckbox, accept);
-        Scene scene = new Scene(optionsLayout, GAME_WIDTH, GAME_HEIGHT);
-        primaryStage.setScene(scene);
+        gameController.setRoot(optionsLayout); // swap root on the shared Scene (JPro-safe)
     }
 
     public void showCreditsScreen(Stage primaryStage) {
@@ -290,8 +287,7 @@ public class MenuView {
         backButton.setOnAction(e -> showMainMenu());
 
         creditsLayout.getChildren().addAll(title, nameBox, backButton);
-        Scene creditsScene = new Scene(creditsLayout, GAME_WIDTH, GAME_HEIGHT);
-        primaryStage.setScene(creditsScene);
+        gameController.setRoot(creditsLayout); // swap root on the shared Scene (JPro-safe)
     }
 
     //__________________________HELPER METHODS_____________________________//

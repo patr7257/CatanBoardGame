@@ -16,6 +16,7 @@ import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.*;
@@ -46,6 +47,13 @@ public class DrawOrDisplay {
 
     // Click highlights
     private final List<Circle> vertexClickHighlights = new ArrayList<>();
+    // Clickable road lines, kept so the board-level dispatcher can hit-test them.
+    private final List<Line> edgeClickLines = new ArrayList<>();
+    // Currently hovered targets, so the dispatcher can clear the highlight on move.
+    private Circle hoverCircle;
+    private Line hoverLine;
+    // Faint green discs mark the clickable settlement spots while developing.
+    private static final boolean DEBUG_CLICK_TARGETS = true;
 
     private final int boardRadius;
     private final Gameplay gameplay;
@@ -71,11 +79,16 @@ public class DrawOrDisplay {
 
             Line clickable = new Line(edge.getVertex1().getX(), edge.getVertex1().getY(),
                     edge.getVertex2().getX(), edge.getVertex2().getY());
-            clickable.setStrokeWidth(1.2 * (10.0 / boardRadius));
+            double clickableWidth = 1.2 * (10.0 / boardRadius);
+            clickable.setStrokeWidth(clickableWidth);
+            clickable.setStroke(Color.GOLD);
             clickable.setOpacity(0);
-            clickable.setPickOnBounds(false);
-            clickable.setMouseTransparent(false);
-            clickable.setOnMouseClicked(controller.createRoadClickHandler(edge));
+            // Mouse-transparent: clicks/hover are routed by the board-level dispatcher,
+            // which hit-tests in scene space so it is correct at any zoom/pan. JPro does
+            // not invert the board's scale transform for its own node picking.
+            clickable.setMouseTransparent(true);
+            clickable.setOnMouseClicked(controller.createRoadClickHandler(edge)); // invoked by the dispatcher
+            edgeClickLines.add(clickable);
             edgeClickLayer.getChildren().add(clickable);
         }
     }
@@ -84,7 +97,6 @@ public class DrawOrDisplay {
         Group settlementLayer = controller.getGameController().getGameView().getSettlementLayer();
         Group edgeClickLayer = controller.getGameController().getGameView().getEdgeClickLayer();
 
-        boolean DEBUG_VISUALIZE_CLICKS = true;
         for (Vertex vertex : board.getVertices()) {
             if (vertex.isSeaOnly()) continue;
 
@@ -97,22 +109,118 @@ public class DrawOrDisplay {
             settlementLayer.getChildren().add(visible);
 
             Circle clickable = new Circle(vertex.getX(), vertex.getY(), clickableRadius);
-            clickable.setPickOnBounds(true);
-            clickable.setOnMouseClicked(controller.createSettlementClickHandler(visible, vertex, root));
-            clickable.setMouseTransparent(false);
+            // Mouse-transparent: clicks/hover routed by the board-level dispatcher (see above).
+            clickable.setMouseTransparent(true);
+            clickable.setOnMouseClicked(controller.createSettlementClickHandler(visible, vertex, root)); // invoked by dispatcher
+            clickable.setFill(idleTargetFill());
+            clickable.setStroke(idleTargetStroke());
+            clickable.setStrokeWidth(0.3);
             vertexClickHighlights.add(clickable);
-
-            if (DEBUG_VISUALIZE_CLICKS) {
-                clickable.setFill(Color.rgb(0, 255, 0, 0.2));
-                clickable.setStroke(Color.BLACK);
-                clickable.setStrokeWidth(0.3);
-            } else {
-                clickable.setFill(Color.TRANSPARENT);
-                clickable.setStroke(Color.TRANSPARENT);
-            }
             edgeClickLayer.getChildren().add(clickable);
         }
     }
+    //___________________________BOARD CLICK / HOVER DISPATCH___________________________//
+    // JPro renders the board's zoom (boardGroup.setScaleX/Y) but does not invert that
+    // scale when picking which node the mouse hit, so direct per-node clicks only work at
+    // zoom 1.0. Instead we capture clicks/moves on the board wrapper and hit-test every
+    // target against its LIVE scene position (localToScene reflects the current zoom+pan),
+    // then invoke that target's stored handler. Correct at any resolution/zoom/pan/board size.
+    public void dispatchBoardClick(MouseEvent event) {
+        Circle vertex = findNearestVertexCircle(event.getSceneX(), event.getSceneY());
+        if (vertex != null && vertex.getOnMouseClicked() != null) {
+            vertex.getOnMouseClicked().handle(event);
+            return;
+        }
+        Line edge = findNearestEdgeLine(event.getSceneX(), event.getSceneY());
+        if (edge != null && edge.getOnMouseClicked() != null) {
+            edge.getOnMouseClicked().handle(event);
+        }
+    }
+
+    public void dispatchBoardHover(MouseEvent event) {
+        if (hoverCircle != null) {
+            hoverCircle.setFill(idleTargetFill());
+            hoverCircle.setStroke(idleTargetStroke());
+            hoverCircle.setStrokeWidth(0.3);
+            hoverCircle = null;
+        }
+        if (hoverLine != null) {
+            hoverLine.setOpacity(0);
+            hoverLine = null;
+        }
+        Circle vertex = findNearestVertexCircle(event.getSceneX(), event.getSceneY());
+        if (vertex != null) {
+            vertex.setFill(Color.rgb(255, 215, 0, 0.55));
+            vertex.setStroke(Color.GOLD);
+            vertex.setStrokeWidth(2.0 / boardRadius);
+            hoverCircle = vertex;
+            return;
+        }
+        Line edge = findNearestEdgeLine(event.getSceneX(), event.getSceneY());
+        if (edge != null) {
+            edge.setOpacity(0.7);
+            hoverLine = edge;
+        }
+    }
+
+    // Map a scene-space click into the board's UNSCALED local coordinates. JPro honors the
+    // board group's translate (panning works) but ignores its scale when delivering input,
+    // so we invert the parent chain + translate but NOT the scale. Targets are then compared
+    // in their own unscaled local coordinates, which is correct at any in-game zoom.
+    private Point2D boardLocalFromScene(double sceneX, double sceneY) {
+        // Zoom now uses an explicit origin-pivot Scale transform (see CatanBoardGameView),
+        // so the standard inverse is correct and bounds-independent.
+        return gameplay.getCatanBoardGameView().getBoardGroup().sceneToLocal(sceneX, sceneY);
+    }
+
+    private Circle findNearestVertexCircle(double sceneX, double sceneY) {
+        Point2D p = boardLocalFromScene(sceneX, sceneY);
+        Circle best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Circle c : vertexClickHighlights) {
+            double dist = Math.hypot(c.getCenterX() - p.getX(), c.getCenterY() - p.getY());
+            double threshold = c.getRadius() * 1.4;
+            if (dist <= threshold && dist < bestDist) {
+                bestDist = dist;
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    private Line findNearestEdgeLine(double sceneX, double sceneY) {
+        Point2D p = boardLocalFromScene(sceneX, sceneY);
+        Line best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Line l : edgeClickLines) {
+            double dist = pointToSegmentDistance(p.getX(), p.getY(),
+                    l.getStartX(), l.getStartY(), l.getEndX(), l.getEndY());
+            double threshold = l.getStrokeWidth() * 1.5;
+            if (dist <= threshold && dist < bestDist) {
+                bestDist = dist;
+                best = l;
+            }
+        }
+        return best;
+    }
+
+    private static double pointToSegmentDistance(double px, double py, double x1, double y1, double x2, double y2) {
+        double dx = x2 - x1, dy = y2 - y1;
+        double len2 = dx * dx + dy * dy;
+        if (len2 == 0) return Math.hypot(px - x1, py - y1);
+        double t = ((px - x1) * dx + (py - y1) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+
+    private Color idleTargetFill() {
+        return DEBUG_CLICK_TARGETS ? Color.rgb(0, 255, 0, 0.2) : Color.TRANSPARENT;
+    }
+
+    private Color idleTargetStroke() {
+        return DEBUG_CLICK_TARGETS ? Color.BLACK : Color.TRANSPARENT;
+    }
+
     //_____________________________________FUNCTIONS_________________________________________//
     public Rectangle createBoxBehindDiceNumber(Text sample, double centerX, double centerY) {
         double padding = 5.0 / boardRadius * 10;

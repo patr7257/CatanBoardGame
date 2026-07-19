@@ -9,12 +9,14 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Group;
-import javafx.scene.Scene;
+import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.transform.Scale;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
@@ -45,8 +47,10 @@ public class CatanBoardGameView {
     private final TurnController turnController;
     private final TradeController tradeController;
 
-    //---------------------------- JavaFX Root Scene ----------------------------//
-    private final Scene scene;
+    //---------------------------- JavaFX Root ----------------------------//
+    // The app owns one shared Scene (in GameController); this view only supplies
+    // its root node, which GameController swaps onto that Scene.
+    private Parent rootNode;
     private final BorderPane root;
 
     //---------------------------- Render Layers ----------------------------//
@@ -55,6 +59,8 @@ public class CatanBoardGameView {
     private final Group settlementLayer;
     private final Group edgeClickLayer;
     private final Group boardGroup;
+    // Origin-pivot zoom transform for the board (JPro-safe; see constructor).
+    private final Scale boardScale = new Scale(1, 1, 0, 0);
 
     //---------------------------- UI Controls ----------------------------//
     private final Button rollDiceButton;
@@ -88,6 +94,10 @@ public class CatanBoardGameView {
 
         // Combine layers into one render-able board group
         this.boardGroup = new Group(edgeBaseLayer, roadLayer, settlementLayer, edgeClickLayer);
+        // Zoom via an explicit Scale that pivots at the ORIGIN (0,0). Unlike setScaleX/Y
+        // (which pivots at the node's bounds-center and resolves wrong under JPro's headless
+        // renderer), this is bounds-independent, so render and localToScene/sceneToLocal agree.
+        boardGroup.getTransforms().add(boardScale);
 
         // Buttons
         this.rollDiceButton = new Button("Roll Dice");
@@ -112,9 +122,6 @@ public class CatanBoardGameView {
         // Create board and register it with gameplay
         this.board = new Board(gameplay, boardRadius, gameController.getMenuView().getGAME_WIDTH(), gameController.getMenuView().getGAME_HEIGHT());
         gameplay.setBoard(this.board);
-
-        // Scene root container — initially just root
-        this.scene = new Scene(root, gameController.getMenuView().getGAME_WIDTH(), gameController.getMenuView().getGAME_HEIGHT());
 
         // Place Robber
         Tile desertTile = board.getTiles().stream()
@@ -154,7 +161,7 @@ public class CatanBoardGameView {
         drawOrDisplay.buildAIOverlay();
         StackPane aiTurnOverlay = drawOrDisplay.buildAIOverlay();
         StackPane layeredRoot = new StackPane(root, aiTurnOverlay);
-        scene.setRoot(layeredRoot);
+        this.rootNode = layeredRoot; // GameController swaps this onto the shared Scene
 
         // Setup KEY buttons clickable ESC, SPACE, ASDW, R,C for reset board etc
         setupInputHandlers(boardWrapper);
@@ -563,7 +570,10 @@ public class CatanBoardGameView {
 
     //boardWrapper The pane that wraps the board and listens for input events
     private void setupInputHandlers(Pane boardWrapper) {
-        scene.setOnKeyPressed(event -> {
+        gameController.getScene().setOnKeyPressed(event -> {
+            // The Scene now persists across menu/options/credits, so ignore board
+            // keys unless the game board screen is actually showing.
+            if (!gameController.isGameScreenActive()) return;
             double step = 30;
             switch (event.getCode()) {
                 case W -> boardGroup.setTranslateY(boardGroup.getTranslateY() - step);
@@ -586,8 +596,8 @@ public class CatanBoardGameView {
                     gameController.resumeGame();
 
                     // Reset focus to scene root
-                    if (scene.getRoot() != null) {
-                        scene.getRoot().requestFocus();
+                    if (gameController.getScene().getRoot() != null) {
+                        gameController.getScene().getRoot().requestFocus();
                     }
                 }
 
@@ -603,8 +613,8 @@ public class CatanBoardGameView {
                         gameController.resumeGame();
 
                         // Reset focus to scene root
-                        if (scene.getRoot() != null) {
-                            scene.getRoot().requestFocus();
+                        if (gameController.getScene().getRoot() != null) {
+                            gameController.getScene().getRoot().requestFocus();
                         }
                     }
                 }
@@ -639,6 +649,12 @@ public class CatanBoardGameView {
             boardGroup.setTranslateX(initialTranslateX[0] + deltaX);
             boardGroup.setTranslateY(initialTranslateY[0] + deltaY);
         });
+
+        // Route board clicks and hover through the dispatcher, which hit-tests targets in
+        // scene space. A plain click (no drag) fires onMouseClicked; onMouseMoved drives the
+        // hover highlight. This is what makes placement accurate at any zoom/pan under JPro.
+        boardWrapper.setOnMouseClicked(event -> drawOrDisplay.dispatchBoardClick(event));
+        boardWrapper.setOnMouseMoved(event -> drawOrDisplay.dispatchBoardHover(event));
     }
 
     // Create the wrapper Pane and set its preferred size based on the game dimensions
@@ -674,15 +690,23 @@ public class CatanBoardGameView {
 
     private void zoom(Group group, double factor) {
         // Calculate the new scale, then clamp it to stay between 0.5 and 3.0
-        double newScale = group.getScaleX() * factor;
+        double newScale = boardScale.getX() * factor;
         newScale = Math.max(0.5, Math.min(newScale, 3.0));
 
-        // Apply scale uniformly on both axes
-        group.setScaleX(newScale);
-        group.setScaleY(newScale);
+        // Apply on the origin-pivot Scale transform (not setScaleX/Y).
+        boardScale.setX(newScale);
+        boardScale.setY(newScale);
     }
 
     public void centerBoard(Group boardGroup, double screenWidth, double screenHeight) {
+        // Prefer the live Scene size (the real window/browser viewport, which under
+        // JPro is not the fixed 1050x700). Fall back to the passed-in game dimensions
+        // before the Scene has been laid out (width/height still 0).
+        if (gameController.getScene() != null && gameController.getScene().getWidth() > 0) {
+            screenWidth = gameController.getScene().getWidth();
+            screenHeight = gameController.getScene().getHeight();
+        }
+
         // Compute bounds of all tile centers
         double minX = Double.MAX_VALUE, maxX = Double.MIN_VALUE;
         double minY = Double.MAX_VALUE, maxY = Double.MIN_VALUE;
@@ -704,19 +728,21 @@ public class CatanBoardGameView {
         double screenCenterX = usableWidth / 2;
         double screenCenterY = usableHeight / 2;
 
-        double targetTranslateX = screenCenterX - boardCenterX;
-        double targetTranslateY = screenCenterY - boardCenterY;
+        // Set the zoom on the origin-pivot Scale, then translate so the board center lands at
+        // the screen center. Because the Scale pivots at (0,0), a board point p renders at
+        // translate + scale*p, so translate = screenCenter - scale*boardCenter.
+        double scaleTarget = 0.75;
+        boardScale.setX(scaleTarget);
+        boardScale.setY(scaleTarget);
 
-        // Animate translation
+        double targetTranslateX = screenCenterX - scaleTarget * boardCenterX;
+        double targetTranslateY = screenCenterY - scaleTarget * boardCenterY;
+
+        // Animate the translation into place.
         TranslateTransition move = new TranslateTransition(Duration.millis(500), boardGroup);
         move.setToX(targetTranslateX);
         move.setToY(targetTranslateY);
-        // Animate scaling
-        ScaleTransition zoom = new ScaleTransition(Duration.millis(500), boardGroup);
-        zoom.setToX(0.75);
-        zoom.setToY(0.75);
-        SequentialTransition sequence = new SequentialTransition(zoom, move);
-        sequence.play();
+        move.play();
     }
 
     //__________________________VIEW UPDATES_____________________________//
@@ -834,8 +860,8 @@ public class CatanBoardGameView {
 
     //__________________________GETTERS_____________________________//
 
-    public Scene getScene() {
-        return scene;
+    public Parent getRootNode() {
+        return rootNode;
     }
     public Robber getRobber() {
         return robber;

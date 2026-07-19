@@ -92,6 +92,17 @@
                 </configuration>
             </plugin>
 
+            <!-- Let Mockito/Byte Buddy instrument mocks when tests run on JDK 25
+                 (JPro's runtime). Harmless on JDK 21. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+                </configuration>
+            </plugin>
+
             <!-- Desktop run: mvn javafx:run -->
             <plugin>
                 <groupId>org.openjfx</groupId>
