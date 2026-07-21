@@ -160,8 +160,8 @@ public class CatanBoardGameView {
         root.setStyle("-fx-background-color: #f9f0d2;");
 
 
-        // Overlay for when AI is making a move (thinking)
-        drawOrDisplay.buildAIOverlay();
+        // Overlay for when AI is making a move (thinking). Build once (it was previously
+        // built twice, decoding the large robot image an extra time and throwing it away).
         StackPane aiTurnOverlay = drawOrDisplay.buildAIOverlay();
         // Non-blocking modal overlay layer. JPro cannot block the FX thread (showAndWait /
         // modal Stages), so every dialog is shown here as in-scene content with callbacks.
@@ -903,17 +903,12 @@ public class CatanBoardGameView {
     private void appendToGameLog(String message) {
         gameLogArea.appendText(message + "\n");
 
-        // Delay to ensure scroll happens after rendering
-        javafx.animation.Timeline scrollTimeline = new javafx.animation.Timeline(
-                new javafx.animation.KeyFrame(
-                        javafx.util.Duration.millis(50),
-                        ae -> {
-                            gameLogArea.setScrollTop(Double.MAX_VALUE);
-                            gameLogArea.positionCaret(gameLogArea.getLength());
-                        }
-                )
-        );
-        scrollTimeline.play();
+        // Defer the scroll once so it runs after the text lays out. Previously this spun up a
+        // fresh 50 ms Timeline animation per log line, which is very frequent during AI turns.
+        Platform.runLater(() -> {
+            gameLogArea.setScrollTop(Double.MAX_VALUE);
+            gameLogArea.positionCaret(gameLogArea.getLength());
+        });
     }
 
     // Displays a visual overlay and message while an AI opponent is taking its turn.
