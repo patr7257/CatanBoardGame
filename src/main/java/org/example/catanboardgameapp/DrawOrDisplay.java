@@ -45,6 +45,10 @@ public class DrawOrDisplay {
     private ImageView thinkingImage;
     private RotateTransition rotateAnimation;
 
+    // Dice faces decoded once and reused (index = dice value 2..12), so a roll does not
+    // re-open and re-decode the PNGs every time.
+    private final Image[] diceImageCache = new Image[13];
+
     // Click highlights
     private final List<Circle> vertexClickHighlights = new ArrayList<>();
     // Clickable road lines, kept so the board-level dispatcher can hit-test them.
@@ -52,8 +56,10 @@ public class DrawOrDisplay {
     // Currently hovered targets, so the dispatcher can clear the highlight on move.
     private Circle hoverCircle;
     private Line hoverLine;
-    // Faint green discs mark the clickable settlement spots while developing.
-    private static final boolean DEBUG_CLICK_TARGETS = true;
+    // When true, every clickable settlement spot is painted a faint green (a debug aid).
+    // Kept OFF in production: painting ~100 non-transparent discs makes JPro re-raster and
+    // stream all of them; the spot under the cursor is shown by the hover highlight instead.
+    private static final boolean DEBUG_CLICK_TARGETS = false;
 
     private final int boardRadius;
     private final Gameplay gameplay;
@@ -138,6 +144,16 @@ public class DrawOrDisplay {
     }
 
     public void dispatchBoardHover(MouseEvent event) {
+        // Resolve what the pointer is over now (a vertex takes priority over an edge).
+        Circle vertex = findNearestVertexCircle(event.getSceneX(), event.getSceneY());
+        Line edge = (vertex == null) ? findNearestEdgeLine(event.getSceneX(), event.getSceneY()) : null;
+
+        // Nothing changed since the last move: do NOT touch the scene graph. Under JPro every
+        // property write forces a server-side re-render + stream, so this guard is what stops
+        // the board from repainting on every pixel of mouse movement (the main source of lag).
+        if (vertex == hoverCircle && edge == hoverLine) return;
+
+        // Clear the previous highlight.
         if (hoverCircle != null) {
             hoverCircle.setFill(idleTargetFill());
             hoverCircle.setStroke(idleTargetStroke());
@@ -148,17 +164,15 @@ public class DrawOrDisplay {
             hoverLine.setOpacity(0);
             hoverLine = null;
         }
+
+        // Apply the new highlight in the current player's colour.
         Color playerColor = currentPlayerColor();
-        Circle vertex = findNearestVertexCircle(event.getSceneX(), event.getSceneY());
         if (vertex != null) {
             vertex.setFill(Color.color(playerColor.getRed(), playerColor.getGreen(), playerColor.getBlue(), 0.55));
             vertex.setStroke(playerColor);
             vertex.setStrokeWidth(2.0 / boardRadius);
             hoverCircle = vertex;
-            return;
-        }
-        Line edge = findNearestEdgeLine(event.getSceneX(), event.getSceneY());
-        if (edge != null) {
+        } else if (edge != null) {
             edge.setStroke(playerColor);
             edge.setOpacity(0.7);
             hoverLine = edge;
@@ -249,20 +263,30 @@ public class DrawOrDisplay {
         return polygon;
     }
     public Image loadDiceImage(int number) {
+        if (number >= 0 && number < diceImageCache.length && diceImageCache[number] != null) {
+            return diceImageCache[number];
+        }
         String path = "/dice/dice" + number + ".png";
         InputStream stream = CatanBoardGameView.class.getResourceAsStream(path);
         if (stream == null) {
             System.err.println("Could not load image: " + path);
             return new WritableImage(1, 1); // harmless transparent placeholder (no error.png asset exists)
         }
-        return new Image(stream);
+        Image image = new Image(stream);
+        if (number >= 0 && number < diceImageCache.length) {
+            diceImageCache[number] = image;
+        }
+        return image;
     }
     public StackPane buildAIOverlay() {
         thinkingLabel = new Label("Waiting for AI...");
         thinkingLabel.setStyle("-fx-font-size: 26px; -fx-text-fill: white; -fx-font-weight: bold;");
         thinkingLabel.setOpacity(0.85);
 
-        Image img = new Image(getClass().getResource("/Icons/robot_think.png").toExternalForm());
+        // Decode this 6.3 MB PNG down to ~240px at load (it is only shown at 120px), instead
+        // of holding the full-resolution bitmap. The overlay spins continuously during AI
+        // turns, so a smaller bitmap means far less to re-raster and stream each frame.
+        Image img = new Image(getClass().getResource("/Icons/robot_think.png").toExternalForm(), 240, 240, true, true);
         thinkingImage = new ImageView(img);
         thinkingImage.setFitWidth(120);
         thinkingImage.setFitHeight(120);
