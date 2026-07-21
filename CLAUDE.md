@@ -12,7 +12,14 @@ It implements the core Catan rules: hex board setup, resource production on
 dice rolls, building roads/settlements/cities, trading, development cards,
 the robber, longest road, and biggest army. The same JavaFX app is also served
 in a browser via JPro (jpro.one), no rewrite of the game; see "Run in the
-browser" below and `DEPLOY.md`.
+browser" below and `DEPLOY.md`. It is deployed live at `catan.patrickrobel.dk`
+(hosted on Dokploy, built from the `Dockerfile` as a `jpro:release` image).
+
+A hard concurrency cap keeps one game running at a time on the shared VPS:
+`GameConfig.MAX_CONCURRENT_GAMES` (+ `ConcurrentGameLimiter`) is enforced in
+`CatanBoardGameApp.start()/stop()`, and `src/main/resources/jpro.conf` reaps an
+abandoned browser session (`closeOnDisconnectAfter`) so the slot frees quickly.
+Player-count limits live in `GameConfig` too. Raise these to allow more.
 
 ## Layout
 
@@ -20,7 +27,7 @@ browser" below and `DEPLOY.md`.
   desktop app; `jpro-maven-plugin` (`jpro:run`) serves it in a browser. Java
   source/target level 21.
 - `src/main/java/module-info.java` - Java module descriptor (`javafx.controls`,
-  `javafx.fxml`, `java.desktop`).
+  `javafx.fxml`, `java.desktop`, `jpro.webapi`).
 - `src/main/java/org/example/catanboardgameapp/` - core game model and logic:
   - `CatanBoardGameApp.java` - JavaFX `Application` entry point.
   - `Board.java`, `Tile.java`, `Vertex.java`, `Edge.java`, `Harbor.java` - board
@@ -34,15 +41,18 @@ browser" below and `DEPLOY.md`.
     placement).
   - `DrawOrDisplay.java` - board and piece rendering helpers.
   - `BuildResult.java` - result type for build actions.
+  - `GameConfig.java` - central game-wide limits (`MIN_PLAYERS`/`MAX_PLAYERS`,
+    `MAX_CONCURRENT_GAMES`).
+  - `ConcurrentGameLimiter.java` - thread-safe cap on concurrent games.
 - `src/main/java/org/example/catanboardgameviews/` - JavaFX views:
   `CatanBoardGameView.java` (main game screen), `MenuView.java` (main menu).
 - `src/main/java/org/example/controller/` - JavaFX controllers wiring views to
   game logic: `GameController.java`, `BuildController.java`,
   `TradeController.java`, `TurnController.java`.
 - `src/main/resources/` - images used by the UI (`Icons/`, `backgrounds/`,
-  `UI/`, `dice/`).
+  `UI/`, `dice/`), plus `jpro.conf` (JPro session-reaping config).
 - `src/test/java/org/example/catanboardgameapp/` - JUnit 5 and Mockito tests:
-  `GameplayTest.java`, `AITester.java`.
+  `GameplayTest.java`, `AITester.java`, `ConcurrentGameLimiterTest.java`.
 
 ## Build, run, test
 
