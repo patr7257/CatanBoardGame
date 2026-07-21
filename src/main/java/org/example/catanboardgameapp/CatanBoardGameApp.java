@@ -1,5 +1,6 @@
 package org.example.catanboardgameapp;
 
+import com.jpro.webapi.WebAPI;
 import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -34,6 +35,14 @@ public class CatanBoardGameApp extends Application {
         }
         countsTowardLimit = true;
 
+        // Release the slot as soon as JPro reports this browser session closing. This is more
+        // reliable than stop() alone; releaseSlot() is idempotent so the two cannot double-free.
+        // How quickly a disconnected tab is considered closed is set in resources/jpro.conf
+        // (closeOnDisconnectAfter). A refresh within that window rejoins the same live game.
+        if (WebAPI.isBrowser()) {
+            WebAPI.getWebAPI(primaryStage).addInstanceCloseListener(this::releaseSlot);
+        }
+
         // Initialize game controller (handles game logic and flow)
         GameController gameController = new GameController(primaryStage);
 
@@ -62,6 +71,12 @@ public class CatanBoardGameApp extends Application {
     // Release this session's slot when the browser session (or desktop window) ends.
     @Override
     public void stop() {
+        releaseSlot();
+    }
+
+    // Give back this session's game slot exactly once (called from both the JPro instance-close
+    // listener and stop(), whichever fires first).
+    private synchronized void releaseSlot() {
         if (countsTowardLimit) {
             countsTowardLimit = false;
             GAME_LIMITER.release();

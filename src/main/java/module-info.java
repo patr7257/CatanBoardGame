@@ -3,6 +3,7 @@ module org.example.catanboardgameapp {
     requires javafx.fxml;
     requires jdk.xml.dom;
     requires java.desktop;
+    requires jpro.webapi; // JPro WebAPI (browser session detection); automatic module
 
     //requires org.controlsfx.controls;
     //requires org.kordamp.bootstrapfx.core;
