@@ -284,10 +284,23 @@ public class MenuView {
             nameBox.getChildren().add(label);
         }
 
+        // Trademark disclaimer: Catan is a trademark of Catan GmbH; this is a
+        // non-commercial student project, not affiliated with or endorsed by them.
+        Label disclaimer = new Label(
+                "Catan and Settlers of Catan are trademarks of Catan GmbH. " +
+                "This is a non-commercial student project, not affiliated with " +
+                "or endorsed by Catan GmbH.");
+        disclaimer.setFont(Font.font("Georgia", FontWeight.NORMAL, 12));
+        disclaimer.setTextFill(Color.DARKRED);
+        disclaimer.setWrapText(true);
+        disclaimer.setMaxWidth(520);
+        disclaimer.setAlignment(Pos.CENTER);
+        disclaimer.setStyle("-fx-text-alignment: center;");
+
         Button backButton = createMenuButton("Back", 180, 50);
         backButton.setOnAction(e -> showMainMenu());
 
-        creditsLayout.getChildren().addAll(title, nameBox, backButton);
+        creditsLayout.getChildren().addAll(title, nameBox, disclaimer, backButton);
         gameController.setRoot(creditsLayout); // swap root on the shared Scene (JPro-safe)
     }
 
