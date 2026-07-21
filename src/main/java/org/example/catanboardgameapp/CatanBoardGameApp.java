@@ -1,8 +1,14 @@
 package org.example.catanboardgameapp;
 
 import javafx.application.Application;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
 import javafx.scene.layout.StackPane;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import org.example.catanboardgameviews.MenuView;
 import org.example.controller.GameController;
@@ -10,9 +16,24 @@ import org.example.controller.GameController;
 //_______________________MAIN APPLICATION ENTRY POINT_________________________//
 public class CatanBoardGameApp extends Application {
 
+    // Concurrent-game cap. Under JPro (single server) every browser session is its own
+    // Application instance running in the same JVM, so this shared limiter caps how many
+    // games run at once across all visitors. The limit itself lives in
+    // GameConfig.MAX_CONCURRENT_GAMES (raise it, and size the VPS up, to allow more).
+    private static final ConcurrentGameLimiter GAME_LIMITER =
+            new ConcurrentGameLimiter(GameConfig.MAX_CONCURRENT_GAMES);
+    private boolean countsTowardLimit = false;
+
     // Application Start
     @Override
     public void start(Stage primaryStage) {
+        // Enforce the cap: if every slot is taken, show a busy screen instead of starting a game.
+        if (!GAME_LIMITER.tryAcquire()) {
+            showServerBusy(primaryStage);
+            return;
+        }
+        countsTowardLimit = true;
+
         // Initialize game controller (handles game logic and flow)
         GameController gameController = new GameController(primaryStage);
 
@@ -35,6 +56,38 @@ public class CatanBoardGameApp extends Application {
 
         // Display the main menu to the user
         menuView.showMainMenu();
+        primaryStage.show();
+    }
+
+    // Release this session's slot when the browser session (or desktop window) ends.
+    @Override
+    public void stop() {
+        if (countsTowardLimit) {
+            countsTowardLimit = false;
+            GAME_LIMITER.release();
+        }
+    }
+
+    // Shown when the concurrent-game cap is already reached. Uses the app's menu palette.
+    private void showServerBusy(Stage primaryStage) {
+        Label message = new Label(
+                "Only one game of Catan can run at a time right now.\n" +
+                "Please try again in a few minutes.");
+        message.setFont(Font.font("Georgia", FontWeight.BOLD, 22));
+        message.setTextFill(Color.web("#fceabb"));
+        message.setWrapText(true);
+        message.setAlignment(Pos.CENTER);
+        message.setStyle("-fx-text-alignment: center;");
+
+        StackPane root = new StackPane(message);
+        root.setStyle("-fx-background-color: #6E2C00;");
+        root.setPadding(new Insets(40));
+
+        Scene scene = new Scene(root);
+        primaryStage.setScene(scene);
+        primaryStage.setTitle("Catan Board Game - busy");
+        primaryStage.setWidth(1050);
+        primaryStage.setHeight(700);
         primaryStage.show();
     }
 

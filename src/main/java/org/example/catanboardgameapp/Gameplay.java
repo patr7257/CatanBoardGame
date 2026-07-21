@@ -92,6 +92,8 @@ public class Gameplay {
     // Sets up all human and AI players and assigns them a color and ID
     public void initializeAllPlayers(int humanCount, int aiEasy, int aiMedium, int aiHard,  boolean shuffle) {
         playerList.clear();
+        // One colour per player, so this list is the hard cap on players and must hold at
+        // least GameConfig.MAX_PLAYERS entries. Add more colours here if MAX_PLAYERS is raised.
         List<Color> colors = new ArrayList<>(List.of(
                 Color.RED, Color.BLUE, Color.GREEN, Color.DARKORANGE, Color.PURPLE, Color.YELLOW
         ));

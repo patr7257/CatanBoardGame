@@ -12,6 +12,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import org.example.catanboardgameapp.AIOpponent;
+import org.example.catanboardgameapp.GameConfig;
 import org.example.controller.GameController;
 
 import java.io.InputStream;
@@ -141,7 +142,7 @@ public class MenuView {
         optionsTitle.setFont(new Font("Georgia", 28));
         optionsTitle.setTextFill(Color.DARKRED);
 
-        Label totalNote = new Label("Choose 2-6 Total Players");
+        Label totalNote = new Label("Choose " + GameConfig.MIN_PLAYERS + "-" + GameConfig.MAX_PLAYERS + " Total Players");
         totalNote.setFont(Font.font("Georgia", 16));
         totalNote.setTextFill(Color.DARKRED);
 
@@ -213,13 +214,13 @@ public class MenuView {
             controls[i][1].setMinWidth(35);
         }
 
-        controls[0][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < 6) humanPlayers[0]++; updateCounts.run(); });
+        controls[0][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < GameConfig.MAX_PLAYERS) humanPlayers[0]++; updateCounts.run(); });
         controls[0][0].setOnAction(e -> { if (humanPlayers[0] > 0) humanPlayers[0]--; updateCounts.run(); });
-        controls[1][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < 6) easyAI[0]++; updateCounts.run(); });
+        controls[1][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < GameConfig.MAX_PLAYERS) easyAI[0]++; updateCounts.run(); });
         controls[1][0].setOnAction(e -> { if (easyAI[0] > 0) easyAI[0]--; updateCounts.run(); });
-        controls[2][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < 6) mediumAI[0]++; updateCounts.run(); });
+        controls[2][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < GameConfig.MAX_PLAYERS) mediumAI[0]++; updateCounts.run(); });
         controls[2][0].setOnAction(e -> { if (mediumAI[0] > 0) mediumAI[0]--; updateCounts.run(); });
-        controls[3][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < 6) hardAI[0]++; updateCounts.run(); });
+        controls[3][1].setOnAction(e -> { if (humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0] < GameConfig.MAX_PLAYERS) hardAI[0]++; updateCounts.run(); });
         controls[3][0].setOnAction(e -> { if (hardAI[0] > 0) hardAI[0]--; updateCounts.run(); });
         controls[4][1].setOnAction(e -> { if (boardSizeVal[0] < 10) boardSizeVal[0]++; updateCounts.run(); });
         controls[4][0].setOnAction(e -> { if (boardSizeVal[0] > 3) boardSizeVal[0]--; updateCounts.run(); });
@@ -306,8 +307,8 @@ public class MenuView {
         accept.setStyle(" -fx-font-size: 18px; -fx-background-color: white; -fx-text-fill: #7b1e1e; -fx-padding: 10 20 10 20; -fx-background-radius: 8; -fx-border-radius: 8;");
         accept.setOnAction(e -> {
             int total = humanPlayers[0] + easyAI[0] + mediumAI[0] + hardAI[0];
-            if (total < 2 || total > 6) {
-                System.out.println("Total players must be between 2 and 6.");
+            if (total < GameConfig.MIN_PLAYERS || total > GameConfig.MAX_PLAYERS) {
+                System.out.println("Total players must be between " + GameConfig.MIN_PLAYERS + " and " + GameConfig.MAX_PLAYERS + ".");
                 return;
             }
             playerCount = humanPlayers[0];
